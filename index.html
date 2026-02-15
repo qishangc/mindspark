@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MindSpark · 想法引力场</title>
+    <style>
+        /* 设计系统 - 变量 */
+        :root {
+            --bg-primary: #ffffff;
+            /* 主背景：纯白 */
+            --bg-card: #f5f5f7;
+            --bg-input: #f5f5f7;
+            --text-primary: #1a1a1a;
+            --text-secondary: #6b6b6b;
+            --border: #e5e5e5;
+            --accent: #1a1a1a;
+            --danger: #cc4444;
+            --card-hover: #eaeaea;
+        }
+
+        /* 深色主题 - 通过 .dark-theme 类激活 */
+        .dark-theme {
+            --bg-primary: #1a1a1a;
+            --bg-card: #252525;
+            --bg-input: #2a2a2a;
+            --text-primary: #e0e0e0;
+            --text-secondary: #888888;
+            --border: #333333;
+            --accent: #ffffff;
+            --danger: #cc4444;
+            --card-hover: #2e2e2e;
+        }
+
+        /* 全局重置 */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background-color: var(--bg-primary);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans SC", sans-serif;
+            color: var(--text-primary);
+            line-height: 1.5;
+            padding: 40px 0;
+            /* 上边距40px，左右0，下边距40px */
+            margin: 0;
+            transition: background-color 0.2s ease, color 0.2s ease;
+        }
+
+
+        .container {
+            max-width: 680px;
+            margin: 0 auto;
+            padding: 0 16px;
+            /* 左右留白，上边距由 body 提供 */
+        }
+
+        /* 顶部输入区 */
+        .top-bar {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 24px;
+        }
+
+        .search-input {
+            flex: 1;
+            background-color: var(--bg-input);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 12px 16px;
+            /* 调大内边距，更舒适 */
+            font-size: 16px;
+            color: var(--text-primary);
+            outline: none;
+            transition: border 0.15s;
+        }
+
+        .search-input:focus {
+            border-color: #555;
+        }
+
+        .search-input::placeholder {
+            color: var(--text-secondary);
+        }
+
+        .search-btn {
+            padding: 12px 20px;
+            background-color: var(--accent);
+            color: var(--bg-primary);
+            /* 注意这里分号 */
+            border: none;
+            border-radius: 8px;
+            font-size: 18px;
+            cursor: pointer;
+            white-space: nowrap;
+            transition: 0.1s;
+        }
+
+        .search-btn:hover {
+            opacity: 0.9;
+        }
+
+        /* 工具栏 */
+        .toolbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 0 16px;
+            border-bottom: 1px solid var(--border);
+            margin-bottom: 16px;
+        }
+
+        .icon {
+            font-size: 20px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            background: transparent;
+            width: auto;
+            height: auto;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+        }
+
+        .icon:hover {
+            color: var(--accent);
+        }
+
+        .icon.active {
+            color: var(--accent);
+        }
+
+        /* 卡片流 */
+        .note-card {
+            background-color: var(--bg-card);
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 12px;
+            transition: background 0.15s, border 0.2s, margin 0.2s;
+            cursor: pointer;
+            animation: fadeIn 0.6s ease-in-out;
+            animation-fill-mode: backwards;
+        }
+
+        .note-card:hover {
+            background-color: var(--card-hover);
+        }
+
+        .note-content {
+            font-size: 16px;
+            color: var(--text-primary);
+            line-height: 1.6;
+            margin-bottom: 12px;
+            /* 3行截断 */
+            display: -webkit-box;
+            -webkit-line-clamp: 3;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+            word-break: break-word;
+        }
+
+        .note-time {
+            font-size: 12px;
+            color: var(--text-secondary);
+            text-align: left;
+        }
+
+        /* 淡出动画 */
+        .note-card.fade-out {
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+
+        .delete-btn:hover {
+            color: var(--danger) !important;
+            transition: color 0.15s;
+        }
+
+        /* ---------- 删除淡出动画 ---------- */
+        .note-card.fade-out {
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+
+        /* 空状态提示（稍后 JS 会用到） */
+        .empty-state {
+            text-align: center;
+            color: var(--text-secondary);
+            padding: 48px 0;
+            font-size: 16px;
+        }
+
+        /* ---------- 模态框（卡片弹出层）---------- */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.2s ease, visibility 0.2s ease;
+        }
+
+        .modal-overlay.active {
+            opacity: 1;
+            visibility: visible;
+        }
+
+        .modal-card {
+            background-color: var(--bg-card);
+            color: var(--text-primary);
+            border-radius: 12px;
+            padding: 24px;
+            max-width: 600px;
+            width: 90%;
+            max-height: 80vh;
+            overflow-y: auto;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+            border: 1px solid var(--border);
+        }
+
+        .modal-content {
+            font-size: 18px;
+            line-height: 1.6;
+            margin-bottom: 20px;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+
+        .modal-time {
+            font-size: 14px;
+            color: var(--text-secondary);
+            margin-bottom: 16px;
+        }
+
+        .modal-close-btn {
+            display: inline-block;
+            padding: 8px 16px;
+            background-color: var(--accent);
+            color: var(--bg-primary);
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: opacity 0.15s;
+        }
+
+        .modal-close-btn:hover {
+            opacity: 0.8;
+        }
+
+        .toolbar-search-input {
+            background-color: var(--bg-input);
+            color: var(--text-primary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 6px 12px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: border 0.15s, width 0.2s ease;
+            outline: none;
+            width: 100%;
+            max-width: 420px;
+            box-sizing: border-box;
+        }
+
+        .toolbar-search-input:focus {
+            border-color: #555
+        }
+
+        .toolbar-search-input::placeholder {
+            color: var(-text-secondary);
+        }
+
+        /*移动端适配：宽度自适应*/
+        @media (max-width: 480px) {
+            .toolbar-search-input {
+                width: 100%;
+            }
+        }
+
+        /*搜索关键词高亮*/
+        mark {
+            background-color: #ffeb3b;
+            color: #1a1a1a;
+            padding: 0 2px;
+            border-radius: 2px;
+        }
+
+        /*深色主体下关键词高亮*/
+        .dark-theme mark {
+            background-color: #f9a825;
+            color: #1a1a1a;
+        }
+
+        /* 搜索框容器（用于定位清除按钮） */
+        .search-container {
+            position: relative;
+            display: block;
+            flex: 1;
+            min-width: 0;
+        }
+
+        /* 清除按钮样式 */
+        .search-clear {
+            position: absolute;
+            right: 8px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: var(--text-secondary);
+            cursor: pointer;
+            font-size: 16px;
+            line-height: 1;
+            padding: 4px;
+            border-radius: 50%;
+            transition: background-color 0.15s;
+            z-index: 2;
+        }
+
+        .search-clear:hover {
+            background-color: rgba(128, 128, 128, 0.2);
+            color: var(--accent);
+        }
+
+        /* 深色主题下 hover 效果适配 */
+        .dark-theme .search-clear:hover {
+            background-color: rgba(255, 255, 255, 0.1);
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+            }
+
+            to {
+                opacity: 1;
+            }
+        }
+
+        /* ---------- 设置下拉菜单 ---------- */
+        .settings-toggle {
+            /* 与普通图标一致，无需额外样式 */
+        }
+
+        .settings-dropdown {
+            position: absolute;
+            top: 100%;
+            /* 位于图标下方 */
+            right: 0;
+            /* 右对齐 */
+            background-color: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 8px 0;
+            min-width: 150px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            z-index: 1001;
+            /* 高于模态框的背景？但模态框 z-index 是 1000，这里稍高确保在下拉时不被遮挡 */
+        }
+
+        .settings-item {
+            display: block;
+            width: 100%;
+            padding: 10px 16px;
+            background: none;
+            border: none;
+            text-align: left;
+            font-size: 14px;
+            color: var(--text-primary);
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+
+        .settings-item:hover {
+            background-color: var(--card-hover);
+        }
+
+        /* 深色主题适配 */
+        .dark-theme .settings-dropdown {
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="container">
+        <!-- 场景 1: 输入框 + 按钮 -->
+        <div class="top-bar">
+            <input type="text" class="search-input" placeholder="写下你的思考">
+            <button class="search-btn">↵</button>
+        </div>
+
+        <!-- 场景 2: 左一个图标，右一个图标 -->
+        <!-- 工具栏 -->
+        <div class="toolbar">
+            <!-- 左侧组：搜索图标 + 搜索框容器（可伸缩） -->
+            <div style="display: flex; gap: 16px; align-items: center; flex: 1;">
+                <div class="icon search-icon" id="searchIcon">🔍</div>
+                <div class="search-container" id="searchContainer" style="display: none;">
+                    <input type="text" class="toolbar-search-input" id="searchBox" placeholder="找找看"
+                        style="width: 100%; padding-right: 30px;">
+                    <span class="search-clear" id="searchClear"
+                        style="position: absolute; right: 8px; top: 50%; transform: translateY(-50%); cursor: pointer; display: none;">✕</span>
+                </div>
+            </div>
+
+            <!-- 右侧组：排序图标 + 主题图标 + 设置图标（带下拉） -->
+            <div style="display: flex; gap: 16px; align-items: center; position: relative;">
+                <div class="icon sort-toggle" data-mode="random" title="随机排列">🔄</div>
+                <div class="icon sort-toggle" data-mode="time" title="按时间排序">📅</div>
+                <div class="icon theme-toggle" aria-label="切换到深色主题" role="button" tabindex="0">🌙</div>
+
+                <!-- 设置图标和下拉菜单 -->
+                <div class="icon settings-toggle" id="settingsToggle" title="设置">⚙️</div>
+                <div class="settings-dropdown" id="settingsDropdown" style="display: none;">
+                    <button class="settings-item" id="exportJsonBtn">导出 JSON</button>
+                    <button class="settings-item" id="exportMarkdownBtn">导出 Markdown</button>
+                    <button class="settings-item" id="importJsonBtn">导入 JSON</button>
+                    <button class="settings-item" id="importMarkdownBtn">导入 Markdown</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 隐藏的文件输入（用于导入） -->
+        <input type="file" id="importFileInput" accept=".json" style="display: none;">
+        <input type="file" id="importMarkdownFileInput" accept=".md" style="display: none;">
+
+        <!-- 场景 3: 笔记栏 -->
+    </div>
+    <!-- 模态框 -->
+    <div class="modal-overlay" id="modalOverlay">
+        <div class="modal-card">
+            <!-- 内容显示区（查看模式） -->
+            <div class="modal-content" id="modalContent"></div>
+            <div class="modal-time" id="modalTime"></div>
+
+            <!-- 编辑模式：文本输入框（默认隐藏） -->
+            <textarea id="modalEditTextarea" class="modal-edit-textarea"
+                style="display: none; width: 100%; min-height: 150px; padding: 12px; background: var(--bg-input); color: var(--text-primary); border: 1px solid var(--border); border-radius: 8px; font-size: 16px; line-height: 1.6; resize: vertical;"></textarea>
+
+            <!-- 按钮组 -->
+            <div style="display: flex; gap: 12px; justify-content: flex-end; margin-top: 16px;">
+                <!-- 查看模式按钮 -->
+                <button class="modal-close-btn" id="modalCloseBtn">关闭</button>
+                <button class="modal-edit-btn" id="modalEditBtn"
+                    style="background: var(--accent); color: var(--bg-primary); border: none; border-radius: 6px; padding: 8px 16px; cursor: pointer; font-size: 14px;">编辑</button>
+                <!-- 编辑模式按钮（默认隐藏） -->
+                <button class="modal-save-btn" id="modalSaveBtn"
+                    style="display: none; background: var(--accent); color: var(--bg-primary); border: none; border-radius: 6px; padding: 8px 16px; cursor: pointer; font-size: 14px;">保存</button>
+                <button class="modal-cancel-btn" id="modalCancelBtn"
+                    style="display: none; background: transparent; color: var(--text-secondary); border: 1px solid var(--border); border-radius: 6px; padding: 8px 16px; cursor: pointer; font-size: 14px;">取消</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+
+</html>
