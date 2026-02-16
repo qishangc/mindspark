@@ -182,12 +182,6 @@
             transition: color 0.15s;
         }
 
-        /* ---------- 删除淡出动画 ---------- */
-        .note-card.fade-out {
-            opacity: 0;
-            transition: opacity 0.3s ease;
-        }
-
         /* 空状态提示（稍后 JS 会用到） */
         .empty-state {
             text-align: center;
@@ -272,7 +266,6 @@
             transition: border 0.15s, width 0.2s ease;
             outline: none;
             width: 100%;
-            max-width: 420px;
             box-sizing: border-box;
         }
 
@@ -281,7 +274,7 @@
         }
 
         .toolbar-search-input::placeholder {
-            color: var(-text-secondary);
+            color: var(--text-secondary);
         }
 
         /*移动端适配：宽度自适应*/
@@ -391,6 +384,78 @@
         .dark-theme .settings-dropdown {
             box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
         }
+
+        /* ---------- 首次使用引导 ---------- */
+        .welcome-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 2000;
+            /* 高于模态框 */
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.2s ease, visibility 0.2s ease;
+        }
+
+        .welcome-overlay.active {
+            opacity: 1;
+            visibility: visible;
+        }
+
+        .welcome-card {
+            background-color: var(--bg-card);
+            color: var(--text-primary);
+            border-radius: 12px;
+            padding: 24px;
+            max-width: 400px;
+            width: 90%;
+            text-align: center;
+            border: 1px solid var(--border);
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+        }
+
+        .welcome-content {
+            font-size: 18px;
+            line-height: 1.6;
+            margin-bottom: 24px;
+        }
+
+        .welcome-btn {
+            background-color: var(--accent);
+            color: var(--bg-primary);
+            border: none;
+            border-radius: 8px;
+            padding: 12px 24px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: opacity 0.15s;
+        }
+
+        .welcome-btn:hover {
+            opacity: 0.8;
+        }
+
+        .related-note-item {
+            padding: 8px 0;
+            border-bottom: 1px dashed var(--border);
+            cursor: pointer;
+            font-size: 14px;
+            color: var(--text-primary);
+        }
+
+        .related-note-item:last-child {
+            border-bottom: none;
+        }
+
+        .related-note-item:hover {
+            background-color: var(--card-hover);
+        }
     </style>
 </head>
 
@@ -407,7 +472,7 @@
         <!-- 工具栏 -->
         <div class="toolbar">
             <!-- 左侧组：搜索图标 + 搜索框容器（可伸缩） -->
-            <div style="display: flex; gap: 16px; align-items: center; flex: 1;">
+            <div style="display: flex; gap: 16px; align-items: center; flex: 1;margin-right: 16px;">
                 <div class="icon search-icon" id="searchIcon">🔍</div>
                 <div class="search-container" id="searchContainer" style="display: none;">
                     <input type="text" class="toolbar-search-input" id="searchBox" placeholder="找找看"
@@ -430,6 +495,7 @@
                     <button class="settings-item" id="exportMarkdownBtn">导出 Markdown</button>
                     <button class="settings-item" id="importJsonBtn">导入 JSON</button>
                     <button class="settings-item" id="importMarkdownBtn">导入 Markdown</button>
+                    <button class="settings-item" id="openAiSettingsBtn">🤖 AI 设置</button>
                 </div>
             </div>
         </div>
@@ -437,6 +503,19 @@
         <!-- 隐藏的文件输入（用于导入） -->
         <input type="file" id="importFileInput" accept=".json" style="display: none;">
         <input type="file" id="importMarkdownFileInput" accept=".md" style="display: none;">
+
+        <!--首次使用引导-->
+        <div class="welcome-overlay" id="welcomeOverlay">
+            <div class="welcome-card">
+                <h2 style="margin-top: 0; color: var(--text-primary);">欢迎使用！</h2>
+                <p style="color: var(--text-secondary); line-height: 1.6;">
+                    这是一个极简的收集、记录你零散想法的工具，它会随机显示你过去记录的想法。你可以随时记录想法，也可以随时导出备份。
+                </p>
+                <div style="margin-top: 20px; display: flex; gap: 12px; justify-content: flex-end;">
+                    <button class="modal-close-btn" id="welcomeBtn">开始使用</button>
+                </div>
+            </div>
+        </div>
 
         <!-- 场景 3: 笔记栏 -->
     </div>
@@ -462,6 +541,43 @@
                     style="display: none; background: var(--accent); color: var(--bg-primary); border: none; border-radius: 6px; padding: 8px 16px; cursor: pointer; font-size: 14px;">保存</button>
                 <button class="modal-cancel-btn" id="modalCancelBtn"
                     style="display: none; background: transparent; color: var(--text-secondary); border: 1px solid var(--border); border-radius: 6px; padding: 8px 16px; cursor: pointer; font-size: 14px;">取消</button>
+            </div>
+            <div class="related-notes" id="relatedNotes"
+                style="margin-top: 20px; border-top: 1px solid var(--border); padding-top: 16px; display: none;">
+                <div style="font-size: 14px; color: var(--text-secondary); margin-bottom: 12px;">相关想法</div>
+                <div id="relatedNotesList"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- AI 设置模态框 -->
+    <div class="modal-overlay" id="aiSettingsOverlay">
+        <div class="modal-card" style="max-width: 500px;">
+            <h3 style="margin-bottom: 16px;">AI 设置</h3>
+            <div style="margin-bottom: 16px;">
+                <label style="display: block; margin-bottom: 4px;">API 服务商</label>
+                <select id="apiProvider" class="search-input" style="width: 100%;">
+                    <option value="openai">OpenAI</option>
+                    <option value="siliconflow">硅基流动</option>
+                    <option value="custom">自定义</option>
+                </select>
+            </div>
+            <div style="margin-bottom: 16px;" id="customApiUrlGroup" style="display: none;">
+                <label style="display: block; margin-bottom: 4px;">API 地址</label>
+                <input type="text" id="customApiUrl" class="search-input" placeholder="https://api.example.com/v1">
+            </div>
+            <div style="margin-bottom: 16px;">
+                <label style="display: block; margin-bottom: 4px;">API Key</label>
+                <input type="password" id="apiKey" class="search-input" placeholder="sk-...">
+            </div>
+            <div style="margin-bottom: 16px;">
+                <label style="display: block; margin-bottom: 4px;">模型名称</label>
+                <input type="text" id="embeddingModel" class="search-input" placeholder="text-embedding-3-small">
+            </div>
+            <div style="display: flex; gap: 12px; justify-content: flex-end;">
+                <button class="modal-close-btn" id="testApiBtn">测试连接</button>
+                <button class="modal-close-btn" id="saveApiSettingsBtn">保存</button>
+                <button class="modal-close-btn" id="closeAiSettingsBtn">取消</button>
             </div>
         </div>
     </div>

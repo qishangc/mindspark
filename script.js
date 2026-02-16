@@ -59,6 +59,86 @@ function timeAgo(dateString) {
     return Math.floor(diff / 2592000) + '个月前';
 }
 
+// 生成向量
+async function generateEmbedding(text) {
+    const settings = JSON.parse(localStorage.getItem('mindspark_api_settings') || '{}');
+    if (!settings.apiKey) {
+        console.warn('未配置 API Key');
+        return null;
+    }
+
+    let apiUrl;
+    if (settings.provider === 'openai') {
+        apiUrl = 'https://api.openai.com/v1/embeddings';
+    } else if (settings.provider === 'siliconflow') {
+        apiUrl = 'https://api.siliconflow.cn/v1/embeddings';
+    } else if (settings.provider === 'custom') {
+        apiUrl = settings.customUrl;
+        if (!apiUrl.endsWith('/embeddings')) apiUrl += '/embeddings';
+    } else {
+        return null;
+    }
+
+    try {
+        const response = await fetch(apiUrl, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${settings.apiKey}`
+            },
+            body: JSON.stringify({
+                input: text,
+                model: settings.model || 'text-embedding-3-small'
+            })
+        });
+        const data = await response.json();
+        if (data.data && data.data[0] && data.data[0].embedding) {
+            return data.data[0].embedding; // 返回向量数组
+        } else {
+            console.error('Embedding API 返回格式错误', data);
+            return null;
+        }
+    } catch (error) {
+        console.error('调用 Embedding API 失败', error);
+        return null;
+    }
+
+    if (!response.ok) {
+        const errorData = await response.json();
+        console.error('API 错误详情:', errorData);
+        return null;
+    }
+}
+
+function cosineSimilarity(vecA, vecB) {
+    if (!vecA || !vecB || vecA.length !== vecB.length) return 0;
+    let dot = 0, magA = 0, magB = 0;
+    for (let i = 0; i < vecA.length; i++) {
+        dot += vecA[i] * vecB[i];
+        magA += vecA[i] * vecA[i];
+        magB += vecB[i] * vecB[i];
+    }
+    if (magA === 0 || magB === 0) return 0;
+    return dot / (Math.sqrt(magA) * Math.sqrt(magB));
+}
+
+function findSimilarNotes(noteId, topN = 5) {
+    const currentNote = notes.find(n => n.id === noteId);
+    if (!currentNote || !currentNote.embedding) return [];
+
+    const similarities = notes
+        .filter(n => n.id !== noteId && n.embedding) // 只考虑有向量的笔记
+        .map(n => ({
+            note: n,
+            similarity: cosineSimilarity(currentNote.embedding, n.embedding)
+        }))
+        .filter(item => item.similarity > 0.8) // 阈值可调
+        .sort((a, b) => b.similarity - a.similarity)
+        .slice(0, topN);
+
+    return similarities.map(item => item.note);
+}
+
 // ============================================================================
 // 3. 本地存储读写
 // ============================================================================
@@ -122,6 +202,23 @@ const searchBox = document.getElementById('searchBox');
 const searchContainer = document.getElementById('searchContainer');
 const searchClear = document.getElementById('searchClear');
 
+const welcomeOverlay = document.getElementById('welcomeOverlay');
+const welcomeBtn = document.getElementById('welcomeBtn');
+
+const relatedContainer = document.getElementById('relatedNotes');
+
+//设置ai元素
+const aiSettingsOverlay = document.getElementById('aiSettingsOverlay');
+const openAiSettingsBtn = document.getElementById('openAiSettingsBtn');
+const closeAiSettingsBtn = document.getElementById('closeAiSettingsBtn');
+const saveApiSettingsBtn = document.getElementById('saveApiSettingsBtn');
+const testApiBtn = document.getElementById('testApiBtn');
+const apiProvider = document.getElementById('apiProvider');
+const customApiUrlGroup = document.getElementById('customApiUrlGroup');
+const customApiUrl = document.getElementById('customApiUrl');
+const apiKey = document.getElementById('apiKey');
+const embeddingModel = document.getElementById('embeddingModel');
+
 // ============================================================================
 // 5. 核心渲染函数
 // ============================================================================
@@ -173,11 +270,21 @@ function addNote(content) {
     const newNote = {
         id: Date.now(),
         content: content,
-        createdAt: new Date().toISOString()
+        createdAt: new Date().toISOString(),
+        embedding: null // 初始为空
     };
     notes.push(newNote);
     saveNotesToLocalStorage();
     renderNotes();
+
+    // 异步生成向量（不等待）
+    generateEmbedding(content).then(embedding => {
+        if (embedding) {
+            newNote.embedding = embedding;
+            saveNotesToLocalStorage(); // 更新存储
+            // 可以选择重新渲染，但没必要
+        }
+    });
 }
 
 function openModal(note) {
@@ -191,8 +298,19 @@ function openModal(note) {
     modalEditBtn.style.display = 'inline-block';
     modalSaveBtn.style.display = 'none';
     modalCancelBtn.style.display = 'none';
-
     modalOverlay.classList.add('active');
+
+    // 查找相关笔记
+    const related = findSimilarNotes(note.id, 3);
+    const relatedList = document.getElementById('relatedNotesList');
+    if (related.length > 0) {
+        relatedList.innerHTML = related.map(rel =>
+            `<div class="related-note-item" data-id="${rel.id}">${escapeHTML(rel.content.substring(0, 50))}…</div>`
+        ).join('');
+        relatedContainer.style.display = 'block';
+    } else {
+        relatedContainer.style.display = 'none';
+    }
 }
 
 function closeModal() {
@@ -273,9 +391,8 @@ function updateSortIcons() {
 // 切换搜索框显示/隐藏
 function toggleSearch(show) {
     const shouldShow = show !== undefined ? show : !searchActive;
-    const searchContainer = document.getElementById('searchContainer');
     if (shouldShow) {
-        searchContainer.style.display = 'inline-block';  // 显示容器
+        searchContainer.style.display = 'block';  // 显示容器
         searchBox.focus();
         searchActive = true;
     } else {
@@ -334,6 +451,33 @@ function renderFilteredNotes(filteredArray, keyword) {
         notesListEl.appendChild(card);
     });
 }
+
+// 保存 API 设置到 localStorage
+function saveApiSettings() {
+    const settings = {
+        provider: apiProvider.value,
+        customUrl: customApiUrl.value,
+        apiKey: apiKey.value,
+        model: embeddingModel.value
+    };
+    localStorage.setItem('mindspark_api_settings', JSON.stringify(settings));
+    alert('设置已保存');
+}
+
+// 加载 API 设置
+function loadApiSettings() {
+    const saved = localStorage.getItem('mindspark_api_settings');
+    if (saved) {
+        const settings = JSON.parse(saved);
+        apiProvider.value = settings.provider || 'openai';
+        customApiUrl.value = settings.customUrl || '';
+        apiKey.value = settings.apiKey || '';
+        embeddingModel.value = settings.model || 'text-embedding-3-small';
+        customApiUrlGroup.style.display = apiProvider.value === 'custom' ? 'block' : 'none';
+    }
+}
+
+saveApiSettingsBtn.addEventListener('click', saveApiSettings);
 
 // ============================================================================
 // 8. 事件监听
@@ -448,12 +592,8 @@ searchBox.addEventListener('keydown', (e) => {
 searchBox.addEventListener('input', (e) => {
     const keyword = e.target.value.trim().toLowerCase();
     filterNotes(keyword);
-});
-
-
-// 监听输入框内容变化，控制清除按钮显示/隐藏
-searchBox.addEventListener('input', () => {
-    if (searchBox.value.trim() !== '') {
+    //控制清除按钮显示
+    if (keyword !== '') {
         searchClear.style.display = 'inline-block';
     } else {
         searchClear.style.display = 'none';
@@ -466,6 +606,22 @@ searchClear.addEventListener('click', () => {
     searchClear.style.display = 'none';
     filterNotes('');           // 恢复完整列表
     searchBox.focus();         // 保持焦点（可选）
+});
+
+openAiSettingsBtn.addEventListener('click', () => {
+    settingsDropdown.style.display = 'none'; // 关闭设置下拉
+    // 加载已保存的配置
+    loadApiSettings();
+    aiSettingsOverlay.classList.add('active');
+});
+
+closeAiSettingsBtn.addEventListener('click', () => {
+    aiSettingsOverlay.classList.remove('active');
+});
+
+// 切换自定义 API 地址显示
+apiProvider.addEventListener('change', () => {
+    customApiUrlGroup.style.display = apiProvider.value === 'custom' ? 'block' : 'none';
 });
 
 // ============================================================================
@@ -603,7 +759,7 @@ function importFromMarkdown(file) {
                 // 剩余部分作为内容（可能包含换行）
                 const content = lines.slice(1).join('\n').trim();
                 return {
-                    id: Date.now() + Math.random(), // 生成唯一 ID（简单处理）
+                    id: Date.now() + Math.floor(Math.random() * 1000),
                     content: content,
                     createdAt: createdAt
                 };
@@ -635,11 +791,111 @@ importMarkdownFileInput.addEventListener('change', (e) => {
     importMarkdownFileInput.value = ''; // 允许重新选择同一文件
 });
 
+relatedContainer.addEventListener('click', (e) => {
+    const item = e.target.closest('.related-note-item');
+    if (!item) return;
+    const id = Number(item.dataset.id);
+    const note = notes.find(n => n.id === id);
+    if (note) openModal(note);
+});
+
+testApiBtn.addEventListener('click', async () => {
+    // 直接从表单获取当前输入的值
+    const settings = {
+        provider: apiProvider.value,
+        customUrl: customApiUrl.value,
+        apiKey: apiKey.value,
+        model: embeddingModel.value
+    };
+
+    // 如果没有输入 API Key，提示
+    if (!settings.apiKey) {
+        alert('请先填写 API Key');
+        return;
+    }
+
+    const testText = '这是一条测试文本';
+    try {
+        // 临时调用一个测试函数（可复用 generateEmbedding 但传入 settings）
+        const embedding = await testEmbedding(testText, settings);
+        if (embedding) {
+            alert('连接成功！向量维度：' + embedding.length);
+        } else {
+            alert('连接失败，请查看控制台详细错误 (F12)');
+        }
+    } catch (error) {
+        alert('连接异常：' + error.message);
+    }
+});
+
+// 新增测试用的嵌入函数（与 generateEmbedding 类似，但接受 settings 参数）
+async function testEmbedding(text, settings) {
+    let apiUrl;
+    if (settings.provider === 'openai') {
+        apiUrl = 'https://api.openai.com/v1/embeddings';
+    } else if (settings.provider === 'siliconflow') {
+        apiUrl = 'https://api.siliconflow.cn/v1/embeddings';
+    } else if (settings.provider === 'custom') {
+        apiUrl = settings.customUrl;
+        if (!apiUrl.endsWith('/embeddings')) apiUrl += '/embeddings';
+    } else {
+        return null;
+    }
+
+    try {
+        const response = await fetch(apiUrl, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${settings.apiKey}`
+            },
+            body: JSON.stringify({
+                input: text,
+                model: settings.model || 'text-embedding-3-small'
+            })
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json();
+            console.error('API 错误详情:', errorData);
+            return null;
+        }
+
+        const data = await response.json();
+        if (data.data && data.data[0] && data.data[0].embedding) {
+            return data.data[0].embedding;
+        } else {
+            console.error('Embedding API 返回格式错误', data);
+            return null;
+        }
+    } catch (error) {
+        console.error('调用 Embedding API 失败', error);
+        return null;
+    }
+}
+
 // ============================================================================
 // 9. 初始化
 // ============================================================================
 
 loadNotesFromLocalStorage();
+
+// ============ 首次使用引导 ============
+
+function checkFirstVisit() {
+    const hasVisited = localStorage.getItem('mindspark_hasVisited');
+    if (!hasVisited) {
+        welcomeOverlay.classList.add('active');
+    }
+}
+
+welcomeBtn.addEventListener('click', () => {
+    welcomeOverlay.classList.remove('active');
+    localStorage.setItem('mindspark_hasVisited', 'true');
+});
+
+// 调用检查（放在初始化最后）
+checkFirstVisit();
 
 const savedTheme = localStorage.getItem('mindspark_theme') || 'light';
 setTheme(savedTheme);
