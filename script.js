@@ -1,902 +1,905 @@
-// ============================================================================
-// 1. 全局数据 & 配置
-// ============================================================================
-let notes = [];
-let sortMode = 'random'; // 'random' 或 'time'
-let currentNote = null; // 当前打开的笔记对象
-let searchActive = false;
+// ============================================
+// MindSpark Lite — Full-featured JS
+// ============================================
 
-// ============================================================================
-// 2. 工具函数（防抖、洗牌、XSS、相对时间、高亮等）
-// ============================================================================
+// --- State ---
+function safeParse(key, fallbackJson) {
+    try {
+        return JSON.parse(localStorage.getItem(key) || fallbackJson);
+    } catch {
+        return JSON.parse(fallbackJson);
+    }
+}
 
-function debounce(fn, delay) {
-    let timer = null;
+function normalizeNotes(rawNotes) {
+    if (!Array.isArray(rawNotes)) return [];
+    return rawNotes
+        .filter(n => n && typeof n === 'object' && typeof n.content === 'string' && n.content.trim())
+        .map(n => ({
+            id: n.id ? String(n.id) : Date.now().toString(),
+            content: n.content,
+            created_at: n.created_at || new Date().toISOString(),
+            embedding: Array.isArray(n.embedding) ? n.embedding : null,
+            view_count: Number.isFinite(n.view_count) ? n.view_count : 0
+        }));
+}
+
+let notes = normalizeNotes(safeParse('mindspark_notes', '[]'));
+let settings = safeParse('mindspark_settings', '{}');
+if (!settings || typeof settings !== 'object' || Array.isArray(settings)) {
+    settings = {};
+}
+let sortMode = 'time';
+let currentDetailNoteId = null;
+let isEditing = false;
+let displayCount = 20;          
+// 当前显示的笔记数量
+
+// --- AI Provider Presets ---
+const AI_PROVIDERS = {
+    openai: {
+        name: 'OpenAI',
+        baseUrl: 'https://api.openai.com/v1',
+        model: 'text-embedding-3-small'
+    },
+    gemini: {
+        name: 'Google Gemini',
+        baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
+        model: 'text-embedding-004'
+    },
+    deepseek: {
+        name: 'DeepSeek',
+        baseUrl: 'https://api.deepseek.com/v1',
+        model: 'deepseek-embedding'
+    },
+    siliconflow: {
+        name: 'SiliconFlow',
+        baseUrl: 'https://api.siliconflow.cn/v1',
+        model: 'BAAI/bge-m3'
+    },
+    custom: {
+        name: '自定义',
+        baseUrl: '',
+        model: ''
+    }
+};
+
+// --- DOM Elements ---
+const noteInput = document.getElementById('noteInput');
+const list = document.getElementById('noteList');
+const empty = document.getElementById('emptyState');
+const search = document.getElementById('searchInput');
+
+// --- Init Theme ---
+if (localStorage.getItem('theme') === 'dark') {
+    document.body.setAttribute('data-theme', 'dark');
+    document.getElementById('themeBtn').textContent = '☀️';
+} else {
+    document.body.removeAttribute('data-theme');
+    document.getElementById('themeBtn').textContent = '🌙';
+}
+
+// --- Init Settings ---
+if (settings.apiBaseUrl) document.getElementById('apiBaseUrl').value = settings.apiBaseUrl;
+if (settings.apiKey) document.getElementById('apiKey').value = settings.apiKey;
+if (settings.apiModel) document.getElementById('apiModel').value = settings.apiModel;
+if (settings.provider) document.getElementById('providerSelect').value = settings.provider;
+
+// ============================================
+// Theme
+// ============================================
+function toggleTheme() {
+    const isDark = document.body.getAttribute('data-theme') === 'dark';
+    if (isDark) {
+        document.body.removeAttribute('data-theme');
+        localStorage.setItem('theme', 'light');
+        document.getElementById('themeBtn').textContent = '🌙';
+    } else {
+        document.body.setAttribute('data-theme', 'dark');
+        localStorage.setItem('theme', 'dark');
+        document.getElementById('themeBtn').textContent = '☀️';
+    }
+}
+
+// ============================================
+// Toast Notification System
+// ============================================
+function showToast(message, type = 'info') {
+    const container = document.getElementById('toastContainer');
+    const toast = document.createElement('div');
+    toast.className = `toast ${type}`;
+    toast.textContent = message;
+    container.appendChild(toast);
+
+    setTimeout(() => {
+        toast.classList.add('fade-out');
+        setTimeout(() => toast.remove(), 300);
+    }, 3000);
+}
+
+// ============================================
+// Note Create Modal
+// ============================================
+function openNoteModal() {
+    closeOnboardingIfOpen();
+    const modal = document.getElementById('noteModal');
+    modal.classList.add('open');
+    noteInput.value = '';
+    document.getElementById('charCount').textContent = '0 字';
+    setTimeout(() => noteInput.focus(), 50);
+}
+
+function closeNoteModal() {
+    document.getElementById('noteModal').classList.remove('open');
+}
+
+noteInput.addEventListener('input', (e) => {
+    document.getElementById('charCount').textContent = `${e.target.value.length} 字`;
+    e.target.style.height = 'auto';
+    e.target.style.height = e.target.scrollHeight + 'px';
+});
+
+noteInput.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+        e.preventDefault();
+        saveNote();
+    }
+});
+
+async function saveNote() {
+    const content = noteInput.value.trim();
+    if (!content) return;
+
+    const saveBtn = document.getElementById('saveBtn');
+    saveBtn.textContent = '保存中...';
+    saveBtn.disabled = true;
+
+    try {
+        let embedding = null;
+        if (settings.apiKey && settings.apiBaseUrl) {
+            try {
+                embedding = await getEmbedding(content);
+            } catch (e) {
+                console.error('Embedding failed:', e);
+            }
+        }
+
+        const note = {
+            id: Date.now().toString(),
+            content,
+            created_at: new Date().toISOString(),
+            embedding,
+            view_count: 0
+        };
+
+        notes.unshift(note);
+        saveNotes();
+
+        closeNoteModal();
+        displayCount = 20;
+        renderNotes();
+        showToast('想法已保存 ✨', 'success');
+    } finally {
+        saveBtn.textContent = '保存 (Ctrl+Enter)';
+        saveBtn.disabled = false;
+    }
+}
+
+function debounce(func, wait) {
+    let timeout;
     return function (...args) {
-        clearTimeout(timer);
-        timer = setTimeout(() => fn.apply(this, args), delay);
+        clearTimeout(timeout);
+        timeout = setTimeout(() => func.apply(this, args), wait);
     };
 }
 
-function shuffleArray(arr) {
-    const copy = [...arr];
-    for (let i = copy.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [copy[i], copy[j]] = [copy[j], copy[i]];
-    }
-    return copy;
+// ============================================
+// Note Detail Modal
+// ============================================
+function openDetailModal(noteId) {
+    closeOnboardingIfOpen();
+    const note = notes.find(n => n.id === noteId);
+    if (!note) return;
+
+    currentDetailNoteId = noteId;
+    isEditing = false;
+
+    // Update view count
+    note.view_count = (note.view_count || 0) + 1;
+    saveNotes();
+
+    // Populate content
+    document.getElementById('detailTime').textContent = formatDate(note.created_at);
+    document.getElementById('detailViewContent').textContent = note.content;
+    document.getElementById('detailViewContent').style.display = 'block';
+    document.getElementById('detailEditContent').style.display = 'none';
+
+    // Reset actions
+    document.getElementById('detailNormalActions').style.display = 'flex';
+    document.getElementById('detailEditActions').style.display = 'none';
+    document.getElementById('deleteConfirmGroup').style.display = 'none';
+    document.getElementById('deleteBtn').style.display = '';
+
+    // Render related notes
+    renderRelatedNotes(note);
+
+    // Show modal
+    document.getElementById('detailModal').classList.add('open');
 }
 
-function escapeHTML(str) {
-    return str.replace(/[&<>"]/g, function (match) {
-        const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' };
-        return map[match];
-    });
+function closeDetailModal() {
+    document.getElementById('detailModal').classList.remove('open');
+    currentDetailNoteId = null;
+    isEditing = false;
 }
 
-function escapeRegExp(string) {
-    return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+function startEditNote() {
+    const note = notes.find(n => n.id === currentDetailNoteId);
+    if (!note) return;
+
+    isEditing = true;
+    const textarea = document.getElementById('detailEditContent');
+    textarea.value = note.content;
+    textarea.style.display = 'block';
+    document.getElementById('detailViewContent').style.display = 'none';
+    document.getElementById('detailNormalActions').style.display = 'none';
+    document.getElementById('detailEditActions').style.display = 'flex';
+
+    setTimeout(() => {
+        textarea.focus();
+        textarea.style.height = 'auto';
+        textarea.style.height = textarea.scrollHeight + 'px';
+    }, 50);
 }
 
-function highlightKeyword(text, keyword) {
-    if (!keyword) return escapeHTML(text);
-    const escapedText = escapeHTML(text);
-    const escapedKeyword = escapeHTML(keyword);
-    const safeKeyword = escapeRegExp(escapedKeyword);
-    const regex = new RegExp(`(${safeKeyword})`, 'gi');
-    return escapedText.replace(regex, '<mark>$1</mark>');
+function cancelEditNote() {
+    isEditing = false;
+    document.getElementById('detailEditContent').style.display = 'none';
+    document.getElementById('detailViewContent').style.display = 'block';
+    document.getElementById('detailNormalActions').style.display = 'flex';
+    document.getElementById('detailEditActions').style.display = 'none';
 }
 
-function timeAgo(dateString) {
-    const now = new Date();
-    const past = new Date(dateString);
-    const diff = Math.floor((now - past) / 1000);
-    if (diff < 60) return '刚刚';
-    if (diff < 3600) return Math.floor(diff / 60) + '分钟前';
-    if (diff < 86400) return Math.floor(diff / 3600) + '小时前';
-    if (diff < 172800) return '昨天';
-    if (diff < 2592000) return Math.floor(diff / 86400) + '天前';
-    return Math.floor(diff / 2592000) + '个月前';
-}
+async function saveEditNote() {
+    const note = notes.find(n => n.id === currentDetailNoteId);
+    if (!note) return;
 
-// 生成向量
-async function generateEmbedding(text) {
-    const settings = JSON.parse(localStorage.getItem('mindspark_api_settings') || '{}');
-    if (!settings.apiKey) {
-        console.warn('未配置 API Key');
-        return null;
-    }
+    const newContent = document.getElementById('detailEditContent').value.trim();
+    if (!newContent) return;
 
-    let apiUrl;
-    if (settings.provider === 'openai') {
-        apiUrl = 'https://api.openai.com/v1/embeddings';
-    } else if (settings.provider === 'siliconflow') {
-        apiUrl = 'https://api.siliconflow.cn/v1/embeddings';
-    } else if (settings.provider === 'custom') {
-        apiUrl = settings.customUrl;
-        if (!apiUrl.endsWith('/embeddings')) apiUrl += '/embeddings';
-    } else {
-        return null;
-    }
+    const btn = document.getElementById('editSaveBtn');
+    btn.textContent = '保存中...';
+    btn.disabled = true;
 
     try {
-        const response = await fetch(apiUrl, {
+        note.content = newContent;
+
+        // Re-generate embedding if API is configured
+        if (settings.apiKey && settings.apiBaseUrl) {
+            try {
+                note.embedding = await getEmbedding(newContent);
+            } catch (e) {
+                console.error('Re-embedding failed:', e);
+            }
+        }
+
+        saveNotes();
+        document.getElementById('detailViewContent').textContent = newContent;
+        cancelEditNote();
+        renderNotes();
+        showToast('修改已保存', 'success');
+
+        // Re-render related notes with new embedding
+        renderRelatedNotes(note);
+    } finally {
+        btn.textContent = '完成';
+        btn.disabled = false;
+    }
+}
+
+function confirmDeleteNote() {
+    document.getElementById('deleteConfirmGroup').style.display = 'flex';
+    document.getElementById('deleteBtn').style.display = 'none';
+}
+
+function cancelDeleteNote() {
+    document.getElementById('deleteConfirmGroup').style.display = 'none';
+    document.getElementById('deleteBtn').style.display = '';
+}
+
+function executeDeleteNote() {
+    notes = notes.filter(n => n.id !== currentDetailNoteId);
+    saveNotes();
+    closeDetailModal();
+    renderNotes();
+    showToast('想法已删除', 'info');
+}
+
+function renderRelatedNotes(note) {
+    const container = document.getElementById('detailRelatedList');
+    const section = document.getElementById('detailRelated');
+    const related = getRelatedNotes(note);
+
+    if (related.length === 0) {
+        // 无关联时显示鼓励性提示
+        section.style.display = 'block';
+        container.innerHTML = '<div style="color:var(--text-secondary); padding:12px; text-align:center;">✨ 这是一个全新的想法，没有找到相似笔记。</div>';
+        return;
+    }
+
+    section.style.display = 'block';
+    container.innerHTML = related.map(r => `
+        <div class="related-note" onclick="navigateToRelatedNote('${r.id}')">
+            <div style="word-break:break-word;">${escapeHtml(r.content.length > 90 ? r.content.slice(0, 90) + '...' : r.content)}</div>
+            <div class="related-similarity">相似度 ${(r.similarity * 100).toFixed(0)}%</div>
+        </div>
+    `).join('');
+}
+
+function navigateToRelatedNote(noteId) {
+    closeDetailModal();
+    setTimeout(() => openDetailModal(noteId), 300);
+}
+
+// ============================================
+// Note Card Delete (in list)
+// ============================================
+function deleteNote(id, e) {
+    e.stopPropagation();
+    if (confirm('确定要删除这条想法吗？')) {
+        notes = notes.filter(n => n.id !== id);
+        saveNotes();
+        // 不重置 displayCount，保持当前加载的条数
+        renderNotes();
+        showToast('想法已删除', 'info');
+    }
+}
+
+// ============================================
+// Sort
+// ============================================
+function setSort(mode) {
+    sortMode = mode;
+    document.getElementById('sortTimeBtn').style.color = mode === 'time' ? 'var(--accent)' : 'var(--text-secondary)';
+    document.getElementById('sortRandomBtn').style.color = mode === 'random' ? 'var(--accent)' : 'var(--text-secondary)';
+    displayCount = 20;
+    renderNotes();
+}
+
+// ============================================
+// Settings
+// ============================================
+function openSettings() {
+    try {
+        closeOnboardingIfOpen();
+        // 重新填充 API 设置（从内存 settings 读取，因为保存时已更新）
+        if (settings.apiBaseUrl) document.getElementById('apiBaseUrl').value = settings.apiBaseUrl;
+        if (settings.apiKey) document.getElementById('apiKey').value = settings.apiKey;
+        if (settings.apiModel) document.getElementById('apiModel').value = settings.apiModel;
+        if (settings.provider) document.getElementById('providerSelect').value = settings.provider;
+
+        // 安全调用 onProviderChange
+        if (typeof onProviderChange === 'function') {
+            onProviderChange();
+        }
+
+        document.getElementById('settingsModal').classList.add('open');
+    } catch (error) {
+        console.error('打开设置出错:', error);
+        showToast('打开设置失败，请查看控制台', 'error');
+    }
+}
+function closeSettings() {
+    document.getElementById('settingsModal').classList.remove('open');
+}
+
+function onProviderChange() {
+    const provider = document.getElementById('providerSelect').value;
+    const preset = AI_PROVIDERS[provider];
+    if (preset && provider !== 'custom') {
+        document.getElementById('apiBaseUrl').value = preset.baseUrl;
+        document.getElementById('apiModel').value = preset.model;
+    }
+}
+
+async function testApiConnection() {
+    const provider = document.getElementById('providerSelect').value;
+    let apiBaseUrl = document.getElementById('apiBaseUrl').value.trim().replace(/\/$/,'');
+    const apiKey = document.getElementById('apiKey').value.trim();
+    const apiModel = document.getElementById('apiModel').value.trim();
+
+    if (!apiKey) {
+        showToast('请先填写 API Key', 'error');
+        return;
+    }
+    if (!apiBaseUrl) {
+        // 如果没填，尝试从预设中获取
+        const preset = AI_PROVIDERS[provider];
+        if (preset && provider !== 'custom') {
+            apiBaseUrl = preset.baseUrl;
+        } else {
+            showToast('请填写 API Base URL', 'error');
+            return;
+        }
+    }
+
+    const testText = '这是一条测试消息';
+    const url = `${apiBaseUrl}/embeddings`;
+
+    showToast('测试中...', 'info');
+    try {
+        const res = await fetch(url, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${settings.apiKey}`
+                'Authorization': `Bearer ${apiKey}`
             },
             body: JSON.stringify({
-                input: text,
-                model: settings.model || 'text-embedding-3-small'
+                model: apiModel || 'text-embedding-3-small',
+                input: testText
             })
         });
-        const data = await response.json();
-        if (data.data && data.data[0] && data.data[0].embedding) {
-            return data.data[0].embedding; // 返回向量数组
-        } else {
-            console.error('Embedding API 返回格式错误', data);
-            return null;
+
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error?.message || `HTTP ${res.status}`);
         }
-    } catch (error) {
-        console.error('调用 Embedding API 失败', error);
-        return null;
+
+        const data = await res.json();
+        const dim = data.data[0].embedding.length;
+        showToast(`连接成功！向量维度: ${dim}`, 'success');
+    } catch (err) {
+        showToast(`连接失败: ${err.message}`, 'error');
+    }
+}
+
+function saveSettings() {
+    const provider = document.getElementById('providerSelect').value;
+    const apiBaseUrl = document.getElementById('apiBaseUrl').value.trim().replace(/\/$/, '');
+    const apiKey = document.getElementById('apiKey').value.trim();
+    const apiModel = document.getElementById('apiModel').value.trim();
+
+    settings = { provider, apiBaseUrl, apiKey, apiModel };
+    localStorage.setItem('mindspark_settings', JSON.stringify(settings));
+
+    closeSettings();
+    showToast('配置已保存', 'success');
+}
+
+// ============================================
+// Global Shortcuts
+// ============================================
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+        closeNoteModal();
+        closeSettings();
+        closeDetailModal();
+    }
+    if ((e.ctrlKey || e.metaKey) && e.key === 'n') {
+        e.preventDefault();
+        openNoteModal();
+    }
+});
+
+// ============================================
+// Date Formatting
+// ============================================
+function formatDate(iso) {
+    const date = new Date(iso);
+    const now = new Date();
+    const diff = now - date;
+
+    if (diff < 60000) return '刚刚';
+    if (diff < 3600000) return `${Math.floor(diff / 60000)}分钟前`;
+    if (diff < 86400000) return `${Math.floor(diff / 3600000)}小时前`;
+    if (diff < 604800000) return `${Math.floor(diff / 86400000)}天前`;
+
+    return date.toLocaleString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
+// ============================================
+// AI Embedding
+// ============================================
+async function getEmbedding(text) {
+    if (!settings.apiKey) return null;
+    const url = `${settings.apiBaseUrl || 'https://api.openai.com/v1'}/embeddings`;
+
+    const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${settings.apiKey}`
+        },
+        body: JSON.stringify({
+            model: settings.apiModel || 'text-embedding-3-small',
+            input: text.replace(/\n/g, ' ')
+        })
+    });
+
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error?.message || 'API Error');
     }
 
-    if (!response.ok) {
-        const errorData = await response.json();
-        console.error('API 错误详情:', errorData);
-        return null;
-    }
+    const data = await res.json();
+    return data.data[0].embedding;
 }
 
 function cosineSimilarity(vecA, vecB) {
     if (!vecA || !vecB || vecA.length !== vecB.length) return 0;
-    let dot = 0, magA = 0, magB = 0;
+    let dot = 0, normA = 0, normB = 0;
     for (let i = 0; i < vecA.length; i++) {
         dot += vecA[i] * vecB[i];
-        magA += vecA[i] * vecA[i];
-        magB += vecB[i] * vecB[i];
+        normA += vecA[i] * vecA[i];
+        normB += vecB[i] * vecB[i];
     }
-    if (magA === 0 || magB === 0) return 0;
-    return dot / (Math.sqrt(magA) * Math.sqrt(magB));
+    return dot / (Math.sqrt(normA) * Math.sqrt(normB));
 }
 
-function findSimilarNotes(noteId, topN = 5) {
-    const currentNote = notes.find(n => n.id === noteId);
-    if (!currentNote || !currentNote.embedding) return [];
+function getRelatedNotes(targetNote) {
+    if (!targetNote.embedding) return [];
 
-    const similarities = notes
-        .filter(n => n.id !== noteId && n.embedding) // 只考虑有向量的笔记
+    // 计算所有候选笔记的相似度
+    let candidates = notes
+        .filter(n => n.id !== targetNote.id && n.embedding)
         .map(n => ({
-            note: n,
-            similarity: cosineSimilarity(currentNote.embedding, n.embedding)
+            ...n,
+            similarity: cosineSimilarity(targetNote.embedding, n.embedding)
         }))
-        .filter(item => item.similarity > 0.8) // 阈值可调
-        .sort((a, b) => b.similarity - a.similarity)
-        .slice(0, topN);
+        .filter(c => c.similarity > 0.3); 
+        // 先过滤掉极低相似度的
 
-    return similarities.map(item => item.note);
+    if (candidates.length === 0) return [];
+
+    // 按相似度排序
+    candidates.sort((a, b) => b.similarity - a.similarity);
+
+    const top = candidates[0];
+    const second = candidates[1]?.similarity || 0;
+    const avgFirstThree = candidates.slice(0, 3).reduce((s, c) => s + c.similarity, 0) / Math.min(3, candidates.length);
+
+    // 动态阈值判断
+    if (candidates.length === 1 && top.similarity > 0.6) {
+        return [top]; 
+        // 只有一条且足够好
+    } else if (top.similarity - second > 0.15) {
+        return [top];
+        // 第一条显著突出
+    } else if (avgFirstThree > 0.65) {
+        return candidates.slice(0, 3); 
+        // 前几条整体不错
+    }
+    return [];
 }
 
-// ============================================================================
-// 3. 本地存储读写
-// ============================================================================
+// ============================================
+// Batch Process Embeddings
+// ============================================
+async function processAllNotes() {
+    const btn = document.getElementById('processBtn');
+    const status = document.getElementById('processStatus');
+    if (!settings.apiKey) {
+        showToast('请先配置 API Key', 'error');
+        return;
+    }
 
-function saveNotesToLocalStorage() {
-    localStorage.setItem('mindspark_notes', JSON.stringify(notes));
-}
+    btn.disabled = true;
+    let count = 0;
+    let success = 0;
 
-function loadNotesFromLocalStorage() {
-    const stored = localStorage.getItem('mindspark_notes');
-    if (stored) {
-        notes = JSON.parse(stored);
-    } else {
-        notes = [
-            {
-                id: 1,
-                content: '这是第一条笔记的内容。你可以写很长，但卡片默认只显示3行。超过部分会被截断，并显示省略号...',
-                createdAt: new Date().toISOString()
-            },
-            {
-                id: 2,
-                content: '昨天想到的一个点子：也许我们可以用随机排列来制造偶遇感，让旧想法自己跳出来。',
-                createdAt: new Date(Date.now() - 86400000).toISOString()
-            },
-            {
-                id: 3,
-                content: '三个月前写了一段关于自由意志的思考，现在看起来还是很有意思。人做决定的时候，其实已经决定了。',
-                createdAt: new Date(Date.now() - 7776000000).toISOString()
+    const targets = notes.filter(n => !n.embedding);
+    status.textContent = `准备处理 ${targets.length} 条笔记...`;
+
+    for (const note of targets) {
+        count++;
+        status.textContent = `处理中 ${count}/${targets.length}...`;
+        try {
+            const vec = await getEmbedding(note.content);
+            if (vec) {
+                note.embedding = vec;
+                success++;
+                saveNotes();
             }
-        ];
-        saveNotesToLocalStorage();
-    }
-    renderNotes();
-}
-
-// ============================================================================
-// 4. DOM 元素引用
-// ============================================================================
-
-const inputEl = document.querySelector('.search-input');
-const sendBtn = document.querySelector('.search-btn');
-const container = document.querySelector('.container');
-
-const modalOverlay = document.getElementById('modalOverlay');
-const modalContent = document.getElementById('modalContent');
-const modalTime = document.getElementById('modalTime');
-const modalCloseBtn = document.getElementById('modalCloseBtn');
-
-const modalEditBtn = document.getElementById('modalEditBtn');
-const modalSaveBtn = document.getElementById('modalSaveBtn');
-const modalCancelBtn = document.getElementById('modalCancelBtn');
-const modalEditTextarea = document.getElementById('modalEditTextarea');
-
-const sortToggles = document.querySelectorAll('.sort-toggle');
-const randomIcon = document.querySelector('.sort-toggle[data-mode="random"]');
-const timeIcon = document.querySelector('.sort-toggle[data-mode="time"]');
-const themeToggle = document.querySelector('.theme-toggle');
-
-const searchIcon = document.getElementById('searchIcon');
-const searchBox = document.getElementById('searchBox');
-const searchContainer = document.getElementById('searchContainer');
-const searchClear = document.getElementById('searchClear');
-
-const welcomeOverlay = document.getElementById('welcomeOverlay');
-const welcomeBtn = document.getElementById('welcomeBtn');
-
-const relatedContainer = document.getElementById('relatedNotes');
-
-//设置ai元素
-const aiSettingsOverlay = document.getElementById('aiSettingsOverlay');
-const openAiSettingsBtn = document.getElementById('openAiSettingsBtn');
-const closeAiSettingsBtn = document.getElementById('closeAiSettingsBtn');
-const saveApiSettingsBtn = document.getElementById('saveApiSettingsBtn');
-const testApiBtn = document.getElementById('testApiBtn');
-const apiProvider = document.getElementById('apiProvider');
-const customApiUrlGroup = document.getElementById('customApiUrlGroup');
-const customApiUrl = document.getElementById('customApiUrl');
-const apiKey = document.getElementById('apiKey');
-const embeddingModel = document.getElementById('embeddingModel');
-
-// ============================================================================
-// 5. 核心渲染函数
-// ============================================================================
-
-function renderNotes() {
-    let notesListEl = document.querySelector('.notes-list');
-    if (!notesListEl) {
-        notesListEl = document.createElement('div');
-        notesListEl.className = 'notes-list';
-        container.appendChild(notesListEl);
-    }
-
-    if (notes.length === 0) {
-        notesListEl.innerHTML = '<div class="empty-state">写下你脑子里正在转的东西</div>';
-        return;
-    }
-
-    let sortedNotes = [...notes];
-    if (sortMode === 'random') {
-        sortedNotes = shuffleArray(sortedNotes);
-    } else {
-        sortedNotes.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-    }
-
-    notesListEl.innerHTML = '';
-    sortedNotes.forEach((note, index) => {
-        const card = document.createElement('div');
-        card.className = 'note-card';
-        card.dataset.id = note.id;
-        // 根据索引设置动画延迟，每个卡片延迟增加 0.05 秒（50ms）
-        card.style.animationDelay = `${index * 0.15}s`;
-        card.innerHTML = `
-            <div style="display: flex; justify-content: space-between; align-items: start;">
-                <div class="note-content" style="flex:1;">${escapeHTML(note.content)}</div>
-                <span class="delete-btn" style="color: #888; cursor: pointer; padding: 4px; margin-left: 8px;">✕</span>
-            </div>
-            <div class="note-time">${timeAgo(note.createdAt)}</div>
-        `;
-        notesListEl.appendChild(card);
-    });
-}
-
-// ============================================================================
-// 6. 笔记操作（添加、删除、编辑、模态框）
-// ============================================================================
-
-function addNote(content) {
-    if (!content.trim()) return;
-    const newNote = {
-        id: Date.now(),
-        content: content,
-        createdAt: new Date().toISOString(),
-        embedding: null // 初始为空
-    };
-    notes.push(newNote);
-    saveNotesToLocalStorage();
-    renderNotes();
-
-    // 异步生成向量（不等待）
-    generateEmbedding(content).then(embedding => {
-        if (embedding) {
-            newNote.embedding = embedding;
-            saveNotesToLocalStorage(); // 更新存储
-            // 可以选择重新渲染，但没必要
+            await new Promise(r => setTimeout(r, 200));
+        } catch (e) {
+            console.error(e);
+            status.textContent = `处理中 ${count}/${targets.length}... (出错，继续)`;
         }
-    });
-}
-
-function openModal(note) {
-    currentNote = note;
-    modalContent.textContent = note.content;
-    modalTime.textContent = timeAgo(note.createdAt);
-
-    modalContent.style.display = 'block';
-    modalEditTextarea.style.display = 'none';
-    modalCloseBtn.style.display = 'inline-block';
-    modalEditBtn.style.display = 'inline-block';
-    modalSaveBtn.style.display = 'none';
-    modalCancelBtn.style.display = 'none';
-    modalOverlay.classList.add('active');
-
-    // 查找相关笔记
-    const related = findSimilarNotes(note.id, 3);
-    const relatedList = document.getElementById('relatedNotesList');
-    if (related.length > 0) {
-        relatedList.innerHTML = related.map(rel =>
-            `<div class="related-note-item" data-id="${rel.id}">${escapeHTML(rel.content.substring(0, 50))}…</div>`
-        ).join('');
-        relatedContainer.style.display = 'block';
-    } else {
-        relatedContainer.style.display = 'none';
     }
-}
 
-function closeModal() {
-    modalOverlay.classList.remove('active');
-}
-
-function enterEditMode() {
-    if (!currentNote) return;
-    modalContent.style.display = 'none';
-    modalEditTextarea.style.display = 'block';
-    modalEditTextarea.value = currentNote.content;
-    modalEditTextarea.focus();
-
-    modalCloseBtn.style.display = 'none';
-    modalEditBtn.style.display = 'none';
-    modalSaveBtn.style.display = 'inline-block';
-    modalCancelBtn.style.display = 'inline-block';
-}
-
-function saveEdit() {
-    if (!currentNote) return;
-    const newContent = modalEditTextarea.value.trim();
-    if (newContent === '') {
-        alert('内容不能为空');
-        return;
-    }
-    currentNote.content = newContent;
-    saveNotesToLocalStorage();
+    status.textContent = `完成！成功处理 ${success} 条。`;
+    btn.disabled = false;
     renderNotes();
-    closeModal();
+    showToast(`成功处理 ${success} 条笔记的向量`, 'success');
 }
 
-function cancelEdit() {
-    modalContent.style.display = 'block';
-    modalEditTextarea.style.display = 'none';
-    modalCloseBtn.style.display = 'inline-block';
-    modalEditBtn.style.display = 'inline-block';
-    modalSaveBtn.style.display = 'none';
-    modalCancelBtn.style.display = 'none';
-}
-
-// 增强 closeModal：关闭时重置编辑状态
-const originalCloseModal = closeModal;
-closeModal = function () {
-    modalContent.style.display = 'block';
-    modalEditTextarea.style.display = 'none';
-    modalCloseBtn.style.display = 'inline-block';
-    modalEditBtn.style.display = 'inline-block';
-    modalSaveBtn.style.display = 'none';
-    modalCancelBtn.style.display = 'none';
-    originalCloseModal();
-};
-
-// ============================================================================
-// 7. UI 交互函数（主题、排序图标、搜索）
-// ============================================================================
-
-function setTheme(theme) {
-    if (theme === 'dark') {
-        document.body.classList.add('dark-theme');
-        themeToggle.textContent = '☀️';
-        themeToggle.setAttribute('aria-label', '切换到浅色主题');
-    } else {
-        document.body.classList.remove('dark-theme');
-        themeToggle.textContent = '🌙';
-        themeToggle.setAttribute('aria-label', '切换到深色主题');
-    }
-    localStorage.setItem('mindspark_theme', theme);
-}
-
-function updateSortIcons() {
-    sortToggles.forEach(icon => {
-        const mode = icon.dataset.mode;
-        icon.classList.toggle('active', mode === sortMode);
-    });
-}
-
-// 切换搜索框显示/隐藏
-function toggleSearch(show) {
-    const shouldShow = show !== undefined ? show : !searchActive;
-    if (shouldShow) {
-        searchContainer.style.display = 'block';  // 显示容器
-        searchBox.focus();
-        searchActive = true;
-    } else {
-        searchContainer.style.display = 'none';
-        searchBox.value = '';
-        searchClear.style.display = 'none';   // 隐藏清除按钮
-        searchActive = false;
-        filterNotes('');
-    }
-}
-
-function filterNotes(keyword) {
-    if (keyword === '') {
-        renderNotes();
-        return;
-    }
-    const filtered = notes.filter(note =>
-        note.content.toLowerCase().includes(keyword)
-    );
-    renderFilteredNotes(filtered, keyword);
-}
-
-function renderFilteredNotes(filteredArray, keyword) {
-    let notesListEl = document.querySelector('.notes-list');
-    if (!notesListEl) {
-        notesListEl = document.createElement('div');
-        notesListEl.className = 'notes-list';
-        container.appendChild(notesListEl);
-    }
-
-    if (filteredArray.length === 0) {
-        notesListEl.innerHTML = '<div class="empty-state">没有找到相关想法</div>';
-        return;
-    }
-
-    let sorted = [...filteredArray];
-    if (sortMode === 'random') {
-        sorted = shuffleArray(sorted);
-    } else {
-        sorted.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-    }
-
-    notesListEl.innerHTML = '';
-    sorted.forEach((note, index) => {
-        const card = document.createElement('div');
-        card.className = 'note-card';
-        card.dataset.id = note.id;
-        card.style.animationDelay = `${index * 0.15}s`;  // 添加这一行
-        card.innerHTML = `
-            <div style="display: flex; justify-content: space-between; align-items: start;">
-                <div class="note-content" style="flex:1;">${highlightKeyword(note.content, keyword)}</div>
-                <span class="delete-btn" style="color: #888; cursor: pointer; padding: 4px; margin-left: 8px;">✕</span>
-            </div>
-            <div class="note-time">${timeAgo(note.createdAt)}</div>
-        `;
-        notesListEl.appendChild(card);
-    });
-}
-
-// 保存 API 设置到 localStorage
-function saveApiSettings() {
-    const settings = {
-        provider: apiProvider.value,
-        customUrl: customApiUrl.value,
-        apiKey: apiKey.value,
-        model: embeddingModel.value
-    };
-    localStorage.setItem('mindspark_api_settings', JSON.stringify(settings));
-    alert('设置已保存');
-}
-
-// 加载 API 设置
-function loadApiSettings() {
-    const saved = localStorage.getItem('mindspark_api_settings');
-    if (saved) {
-        const settings = JSON.parse(saved);
-        apiProvider.value = settings.provider || 'openai';
-        customApiUrl.value = settings.customUrl || '';
-        apiKey.value = settings.apiKey || '';
-        embeddingModel.value = settings.model || 'text-embedding-3-small';
-        customApiUrlGroup.style.display = apiProvider.value === 'custom' ? 'block' : 'none';
-    }
-}
-
-saveApiSettingsBtn.addEventListener('click', saveApiSettings);
-
-// ============================================================================
-// 8. 事件监听
-// ============================================================================
-
-sendBtn.addEventListener('click', () => {
-    addNote(inputEl.value);
-    inputEl.value = '';
-});
-
-inputEl.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-        addNote(inputEl.value);
-        inputEl.value = '';
-    }
-});
-
-container.addEventListener('click', (e) => {
-    const deleteBtn = e.target.closest('.delete-btn');
-    if (deleteBtn) {
-        e.preventDefault();
-        if (!confirm('确定要删除吗？')) return;
-        const card = deleteBtn.closest('.note-card');
-        if (!card) return;
-        const id = Number(card.dataset.id);
-        card.classList.add('fade-out');
-        setTimeout(() => {
-            notes = notes.filter(note => note.id !== id);
-            saveNotesToLocalStorage();
-            renderNotes();
-        }, 300);
-        return;
-    }
-
-    const card = e.target.closest('.note-card');
-    if (!card) return;
-    const id = Number(card.dataset.id);
-    const note = notes.find(n => n.id === id);
-    if (note) openModal(note);
-});
-
-modalEditBtn.addEventListener('click', enterEditMode);
-modalSaveBtn.addEventListener('click', saveEdit);
-modalCancelBtn.addEventListener('click', cancelEdit);
-modalCloseBtn.addEventListener('click', closeModal);
-
-modalOverlay.addEventListener('click', (e) => {
-    if (e.target === modalOverlay) closeModal();
-});
-
-window.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && modalOverlay.classList.contains('active')) {
-        closeModal();
-    }
-});
-
-window.addEventListener('keydown', (e) => {
-    if (!modalOverlay.classList.contains('active')) return;
-    if (modalEditTextarea.style.display !== 'block') return;
-    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-        e.preventDefault();
-        saveEdit();
-    }
-});
-
-const debouncedRandom = debounce(() => {
-    if (sortMode === 'random') {
-        renderNotes();
-    } else {
-        sortMode = 'random';
-        updateSortIcons();
-        renderNotes();
-    }
-}, 150);
-
-if (randomIcon) {
-    randomIcon.addEventListener('click', debouncedRandom);
-}
-
-if (timeIcon) {
-    timeIcon.addEventListener('click', () => {
-        if (sortMode === 'time') return;
-        sortMode = 'time';
-        updateSortIcons();
-        renderNotes();
-    });
-}
-
-themeToggle.addEventListener('click', () => {
-    const isDark = document.body.classList.contains('dark-theme');
-    setTheme(isDark ? 'light' : 'dark');
-});
-
-searchIcon.addEventListener('click', (e) => {
-    e.stopPropagation();
-    toggleSearch();
-});
-
-document.addEventListener('click', (e) => {
-    if (!searchActive) return;
-    if (!searchIcon.contains(e.target) && !searchBox.contains(e.target)) {
-        toggleSearch(false);
-    }
-});
-
-searchBox.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') {
-        toggleSearch(false);
-    }
-});
-
-searchBox.addEventListener('input', (e) => {
-    const keyword = e.target.value.trim().toLowerCase();
-    filterNotes(keyword);
-    //控制清除按钮显示
-    if (keyword !== '') {
-        searchClear.style.display = 'inline-block';
-    } else {
-        searchClear.style.display = 'none';
-    }
-});
-
-// 点击清除按钮：清空输入框，触发过滤，隐藏按钮
-searchClear.addEventListener('click', () => {
-    searchBox.value = '';
-    searchClear.style.display = 'none';
-    filterNotes('');           // 恢复完整列表
-    searchBox.focus();         // 保持焦点（可选）
-});
-
-openAiSettingsBtn.addEventListener('click', () => {
-    settingsDropdown.style.display = 'none'; // 关闭设置下拉
-    // 加载已保存的配置
-    loadApiSettings();
-    aiSettingsOverlay.classList.add('active');
-});
-
-closeAiSettingsBtn.addEventListener('click', () => {
-    aiSettingsOverlay.classList.remove('active');
-});
-
-// 切换自定义 API 地址显示
-apiProvider.addEventListener('change', () => {
-    customApiUrlGroup.style.display = apiProvider.value === 'custom' ? 'block' : 'none';
-});
-
-// ============================================================================
-// 导入/导出功能
-// ============================================================================
-const settingsToggle = document.getElementById('settingsToggle');
-const settingsDropdown = document.getElementById('settingsDropdown');
-const exportJsonBtn = document.getElementById('exportJsonBtn');
-const exportMarkdownBtn = document.getElementById('exportMarkdownBtn');
-const importJsonBtn = document.getElementById('importJsonBtn');
-const importFileInput = document.getElementById('importFileInput');
-
-// 切换下拉菜单显示
-settingsToggle.addEventListener('click', (e) => {
-    e.stopPropagation();
-    const isVisible = settingsDropdown.style.display === 'block';
-    settingsDropdown.style.display = isVisible ? 'none' : 'block';
-});
-
-// 点击其他地方关闭下拉菜单
-document.addEventListener('click', (e) => {
-    if (!settingsToggle.contains(e.target) && !settingsDropdown.contains(e.target)) {
-        settingsDropdown.style.display = 'none';
-    }
-});
-
-// 导出 JSON
-function downloadJSON() {
+// ============================================
+// Import / Export
+// ============================================
+function exportData() {
     const data = JSON.stringify(notes, null, 2);
     const blob = new Blob([data], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `mindspark-export-${new Date().toISOString().slice(0, 10)}.json`;
+    a.download = `mindspark-notes-${new Date().toISOString().slice(0, 10)}.json`;
     a.click();
     URL.revokeObjectURL(url);
-    settingsDropdown.style.display = 'none'; // 关闭下拉
+    showToast('数据已导出', 'success');
 }
 
-// 导出 Markdown
-function downloadMarkdown() {
+function exportMarkdown() {
     if (notes.length === 0) {
-        alert('没有笔记可导出');
+        showToast('没有笔记可导出', 'info');
         return;
     }
-    const lines = notes.map(note => {
-        const date = new Date(note.createdAt).toISOString().slice(0, 10);
-        return `## ${date}\n\n${note.content}\n\n---`;
-    }).join('\n');
-    const blob = new Blob([lines], { type: 'text/markdown' });
+    const lines = [];
+    let invalidCount = 0;
+    notes.forEach(note => {
+        let dateStr;
+        try {
+            const date = new Date(note.created_at);
+            if (isNaN(date.getTime())) throw new Error('Invalid date');
+            dateStr = date.toISOString().slice(0, 10);
+        } catch (e) {
+            // 无效日期，使用当前日期并计数
+            dateStr = new Date().toISOString().slice(0, 10);
+            invalidCount++;
+        }
+        lines.push(`## ${dateStr}\n\n${note.content}\n\n---`);
+    });
+    if (invalidCount > 0) {
+        console.warn(`导出 MD 时发现 ${invalidCount} 条笔记日期无效，已使用当前日期代替。`);
+        showToast(`${invalidCount} 条笔记日期无效，已用今日日期`, 'info');
+    }
+    const blob = new Blob([lines.join('\n')], { type: 'text/markdown' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
     a.download = `mindspark-export-${new Date().toISOString().slice(0, 10)}.md`;
     a.click();
     URL.revokeObjectURL(url);
-    settingsDropdown.style.display = 'none';
+    showToast('Markdown 导出成功', 'success');
 }
 
-// 导入 JSON
-function importFromJSON(file) {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-        try {
-            const imported = JSON.parse(e.target.result);
-            if (!Array.isArray(imported)) {
-                alert('无效的 JSON 格式：应为笔记数组');
-                return;
-            }
-            // 简单验证：确保每个笔记有 id、content、createdAt
-            const valid = imported.every(item =>
-                item.id && typeof item.content === 'string' && item.createdAt
-            );
-            if (!valid) {
-                alert('JSON 格式不完整，缺少必要字段（id, content, createdAt）');
-                return;
-            }
-            // 合并到现有笔记（避免 id 冲突？简单起见直接追加，id 可能重复，但 Date.now() 重复概率低）
-            // 更安全：生成新 id？但导入的数据应保留原 id，除非冲突。我们直接追加，让用户自己处理。
-            notes.push(...imported);
-            saveNotesToLocalStorage();
-            renderNotes();
-            settingsDropdown.style.display = 'none';
-            alert(`成功导入 ${imported.length} 条笔记`);
-        } catch (err) {
-            alert('解析 JSON 失败：' + err.message);
-        }
-    };
-    reader.readAsText(file);
-}
-
-// 绑定导出按钮
-exportJsonBtn.addEventListener('click', downloadJSON);
-exportMarkdownBtn.addEventListener('click', downloadMarkdown);
-
-// 绑定导入按钮：触发文件选择
-importJsonBtn.addEventListener('click', () => {
-    importFileInput.click();
-});
-
-// 文件选择后处理
-importFileInput.addEventListener('change', (e) => {
-    const file = e.target.files[0];
+function importData(event) {
+    const file = event.target.files[0];
     if (!file) return;
-    importFromJSON(file);
-    importFileInput.value = ''; // 允许再次选择同一个文件
-});
-
-// 新增 Markdown 文件输入元素
-const importMarkdownFileInput = document.getElementById('importMarkdownFileInput');
-const importMarkdownBtn = document.getElementById('importMarkdownBtn');
-
-// 导入 Markdown
-function importFromMarkdown(file) {
     const reader = new FileReader();
     reader.onload = (e) => {
         try {
-            const content = e.target.result;
-            // 按 --- 分割笔记（导出的格式是每个笔记后跟 ---）
-            const noteBlocks = content.split(/\n---\n/).filter(block => block.trim() !== '');
-
-            const importedNotes = noteBlocks.map(block => {
-                // 预期格式：## YYYY-MM-DD\n\n内容
-                const lines = block.split('\n');
-                // 第一行应该是 ## 日期
-                const firstLine = lines[0].trim();
-                let createdAt;
-                const dateMatch = firstLine.match(/^##\s*(\d{4}-\d{2}-\d{2})/);
-                if (dateMatch) {
-                    createdAt = new Date(dateMatch[1]).toISOString();
-                } else {
-                    // 如果没有日期，使用当前时间
-                    createdAt = new Date().toISOString();
+            const data = JSON.parse(e.target.result);
+            if (!Array.isArray(data)) throw new Error('Invalid format');
+            const existingIds = new Set(notes.map(n => n.id));
+            let count = 0;
+            data.forEach(n => {
+                if (!existingIds.has(n.id)) {
+                    if (n.content && n.created_at) {
+                        notes.push(n);
+                        existingIds.add(n.id);
+                        count++;
+                    }
                 }
-                // 剩余部分作为内容（可能包含换行）
-                const content = lines.slice(1).join('\n').trim();
-                return {
-                    id: Date.now() + Math.floor(Math.random() * 1000),
-                    content: content,
-                    createdAt: createdAt
-                };
             });
-
-            // 追加到现有笔记
-            notes.push(...importedNotes);
-            saveNotesToLocalStorage();
+            saveNotes();
             renderNotes();
-            settingsDropdown.style.display = 'none';
-            alert(`成功导入 ${importedNotes.length} 条笔记`);
+            showToast(`成功导入 ${count} 条笔记！`, 'success');
         } catch (err) {
-            alert('解析 Markdown 失败：' + err.message);
+            showToast('导入失败：文件格式错误', 'error');
         }
+        event.target.value = '';
     };
     reader.readAsText(file);
 }
 
-// 绑定导入 Markdown 按钮
-importMarkdownBtn.addEventListener('click', () => {
-    importMarkdownFileInput.click();
-});
+function importMdFiles(event) {
+    const files = event.target.files;
+    if (!files || files.length === 0) return;
 
-// 处理 Markdown 文件选择
-importMarkdownFileInput.addEventListener('change', (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    importFromMarkdown(file);
-    importMarkdownFileInput.value = ''; // 允许重新选择同一文件
-});
+    let count = 0;
+    let processed = 0;
+    const total = files.length;
 
-relatedContainer.addEventListener('click', (e) => {
-    const item = e.target.closest('.related-note-item');
-    if (!item) return;
-    const id = Number(item.dataset.id);
-    const note = notes.find(n => n.id === id);
-    if (note) openModal(note);
-});
+    Array.from(files).forEach(file => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            processed++;
+            const content = e.target.result.trim();
+            if (content) {
+                const note = {
+                    id: (Date.now() + count).toString(),
+                    content,
+                    created_at: new Date().toISOString(),
+                    embedding: null,
+                    view_count: 0
+                };
+                notes.unshift(note);
+                count++;
+            }
+            if (processed === total) {
+                saveNotes();
+                renderNotes();
+                showToast(`成功导入 ${count} 个 MD 文件`, 'success');
+            }
+        };
+        reader.readAsText(file);
+    });
 
-testApiBtn.addEventListener('click', async () => {
-    // 直接从表单获取当前输入的值
-    const settings = {
-        provider: apiProvider.value,
-        customUrl: customApiUrl.value,
-        apiKey: apiKey.value,
-        model: embeddingModel.value
-    };
+    event.target.value = '';
+}
 
-    // 如果没有输入 API Key，提示
-    if (!settings.apiKey) {
-        alert('请先填写 API Key');
+// ============================================
+// Onboarding
+// ============================================
+const ONBOARDING_STEPS = [
+    {
+        title: '欢迎来到 MindSpark',
+        content: '在这里，你只需要专注记录想法。其余的关联与回顾，交给系统处理。'
+    },
+    {
+        title: '写下此刻想法',
+        content: '点击顶部的输入框或按 Ctrl+N 开启专注写作模式。随时记录灵光一闪。'
+    },
+    {
+        title: '用搜索回想',
+        content: '输入关键词搜索你的想法。配置 AI 后，还能通过语义向量找到相似的内容。'
+    },
+    {
+        title: '和自己重逢',
+        content: '在设置里配置 AI 与提醒，让过去的你持续和现在的你对话。开始吧！'
+    }
+];
+
+let onboardingStep = 0;
+
+function closeOnboardingIfOpen() {
+    const onboardingModal = document.getElementById('onboardingModal');
+    if (onboardingModal && onboardingModal.classList.contains('open')) {
+        onboardingModal.classList.remove('open');
+    }
+}
+
+function initOnboarding() {
+    if (localStorage.getItem('mindspark_onboarding_completed')) return;
+    setTimeout(() => {
+        showOnboardingStep(0);
+        document.getElementById('onboardingModal').classList.add('open');
+    }, 800);
+}
+
+function showOnboardingStep(idx) {
+    onboardingStep = idx;
+    const step = ONBOARDING_STEPS[idx];
+    document.getElementById('onboardingTitle').textContent = step.title;
+    document.getElementById('onboardingContent').textContent = step.content;
+
+    // Dots
+    const dotsContainer = document.getElementById('onboardingDots');
+    dotsContainer.innerHTML = ONBOARDING_STEPS.map((_, i) =>
+        `<div class="onboarding-dot${i === idx ? ' active' : ''}" style="width:${i === idx ? '20px' : '8px'};"></div>`
+    ).join('');
+
+    // Button text
+    document.getElementById('onboardingNextBtn').textContent =
+        idx === ONBOARDING_STEPS.length - 1 ? '开始使用' : '下一步';
+}
+
+function nextOnboardingStep() {
+    if (onboardingStep < ONBOARDING_STEPS.length - 1) {
+        showOnboardingStep(onboardingStep + 1);
+    } else {
+        skipOnboarding();
+    }
+}
+
+function skipOnboarding() {
+    document.getElementById('onboardingModal').classList.remove('open');
+    localStorage.setItem('mindspark_onboarding_completed', 'true');
+}
+
+
+// ============================================
+// Render Notes
+// ============================================
+function renderNotes() {
+    const query = search.value.toLowerCase();
+    let displayNotes = notes.filter(n => {
+        const text = typeof n.content === 'string' ? n.content : '';
+        return text.toLowerCase().includes(query);
+    });
+
+    if (sortMode === 'random' && !query) {
+        displayNotes = [...displayNotes].sort(() => Math.random() - 0.5);
+    } else {
+        displayNotes.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    }
+
+    // 分页切片
+    const notesToShow = displayNotes.slice(0, displayCount);
+
+    list.innerHTML = '';
+    if (displayNotes.length === 0) {
+        empty.style.display = 'block';
+        document.getElementById('noteStats').textContent = '';
+        // 隐藏加载更多按钮（如果存在）
+        hideLoadMoreButton();
         return;
     }
+    empty.style.display = 'none';
 
-    const testText = '这是一条测试文本';
-    try {
-        // 临时调用一个测试函数（可复用 generateEmbedding 但传入 settings）
-        const embedding = await testEmbedding(testText, settings);
-        if (embedding) {
-            alert('连接成功！向量维度：' + embedding.length);
-        } else {
-            alert('连接失败，请查看控制台详细错误 (F12)');
-        }
-    } catch (error) {
-        alert('连接异常：' + error.message);
-    }
-});
+    notesToShow.forEach((note, index) => {
+        const contentText = typeof note.content === 'string' ? note.content : '';
+        const div = document.createElement('div');
+        div.className = 'note-card';
+        div.style.animationDelay = `${index * 0.05}s`;
 
-// 新增测试用的嵌入函数（与 generateEmbedding 类似，但接受 settings 参数）
-async function testEmbedding(text, settings) {
-    let apiUrl;
-    if (settings.provider === 'openai') {
-        apiUrl = 'https://api.openai.com/v1/embeddings';
-    } else if (settings.provider === 'siliconflow') {
-        apiUrl = 'https://api.siliconflow.cn/v1/embeddings';
-    } else if (settings.provider === 'custom') {
-        apiUrl = settings.customUrl;
-        if (!apiUrl.endsWith('/embeddings')) apiUrl += '/embeddings';
+        div.innerHTML = `
+            <div class="note-content">${escapeHtml(contentText)}</div>
+            <div class="note-meta">
+                <span>${formatDate(note.created_at)}</span>
+                <button class="delete-btn" onclick="deleteNote('${note.id}', event)">删除</button>
+            </div>
+        `;
+
+        div.onclick = (e) => {
+            if (e.target.closest('.delete-btn')) return;
+            openDetailModal(note.id);
+        };
+
+        list.appendChild(div);
+    });
+
+    // 统计信息
+    const stats = document.getElementById('noteStats');
+    const totalNotes = notes.length;
+    const embeddedCount = notes.filter(n => n.embedding).length;
+    stats.textContent = `共 ${totalNotes} 条想法${embeddedCount > 0 ? ` · ${embeddedCount} 条已嵌入向量` : ''}`;
+
+    // 控制加载更多按钮
+    updateLoadMoreButton(displayNotes.length);
+}
+
+function updateLoadMoreButton(totalFilteredCount) {
+    const loadMoreBtn = document.getElementById('loadMoreBtn');
+    if (!loadMoreBtn) return;
+    if (displayCount < totalFilteredCount) {
+        loadMoreBtn.style.display = 'inline-block';
     } else {
-        return null;
-    }
-
-    try {
-        const response = await fetch(apiUrl, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${settings.apiKey}`
-            },
-            body: JSON.stringify({
-                input: text,
-                model: settings.model || 'text-embedding-3-small'
-            })
-        });
-
-        if (!response.ok) {
-            const errorData = await response.json();
-            console.error('API 错误详情:', errorData);
-            return null;
-        }
-
-        const data = await response.json();
-        if (data.data && data.data[0] && data.data[0].embedding) {
-            return data.data[0].embedding;
-        } else {
-            console.error('Embedding API 返回格式错误', data);
-            return null;
-        }
-    } catch (error) {
-        console.error('调用 Embedding API 失败', error);
-        return null;
+        loadMoreBtn.style.display = 'none';
     }
 }
 
-// ============================================================================
-// 9. 初始化
-// ============================================================================
-
-loadNotesFromLocalStorage();
-
-// ============ 首次使用引导 ============
-
-function checkFirstVisit() {
-    const hasVisited = localStorage.getItem('mindspark_hasVisited');
-    if (!hasVisited) {
-        welcomeOverlay.classList.add('active');
-    }
+function hideLoadMoreButton() {
+    const loadMoreBtn = document.getElementById('loadMoreBtn');
+    if (loadMoreBtn) loadMoreBtn.style.display = 'none';
 }
 
-welcomeBtn.addEventListener('click', () => {
-    welcomeOverlay.classList.remove('active');
-    localStorage.setItem('mindspark_hasVisited', 'true');
-});
+function loadMoreNotes() {
+    displayCount += 20;
+    renderNotes();
+}
 
-// 调用检查（放在初始化最后）
-checkFirstVisit();
+// ============================================
+// Utilities
+// ============================================
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
 
-const savedTheme = localStorage.getItem('mindspark_theme') || 'light';
-setTheme(savedTheme);
-updateSortIcons();
+function saveNotes() {
+    localStorage.setItem('mindspark_notes', JSON.stringify(notes));
+}
+
+// ============================================
+// Init
+// ============================================
+const debouncedRender = debounce(() => {
+    displayCount = 20;
+    renderNotes();
+}, 300);
+search.addEventListener('input', debouncedRender);
+
+renderNotes();
+initOnboarding();

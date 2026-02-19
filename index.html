@@ -4,583 +4,257 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MindSpark · 想法引力场</title>
-    <style>
-        /* 设计系统 - 变量 */
-        :root {
-            --bg-primary: #ffffff;
-            /* 主背景：纯白 */
-            --bg-card: #f5f5f7;
-            --bg-input: #f5f5f7;
-            --text-primary: #1a1a1a;
-            --text-secondary: #6b6b6b;
-            --border: #e5e5e5;
-            --accent: #1a1a1a;
-            --danger: #cc4444;
-            --card-hover: #eaeaea;
-        }
-
-        /* 深色主题 - 通过 .dark-theme 类激活 */
-        .dark-theme {
-            --bg-primary: #1a1a1a;
-            --bg-card: #252525;
-            --bg-input: #2a2a2a;
-            --text-primary: #e0e0e0;
-            --text-secondary: #888888;
-            --border: #333333;
-            --accent: #ffffff;
-            --danger: #cc4444;
-            --card-hover: #2e2e2e;
-        }
-
-        /* 全局重置 */
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
-        body {
-            background-color: var(--bg-primary);
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans SC", sans-serif;
-            color: var(--text-primary);
-            line-height: 1.5;
-            padding: 40px 0;
-            /* 上边距40px，左右0，下边距40px */
-            margin: 0;
-            transition: background-color 0.2s ease, color 0.2s ease;
-        }
-
-
-        .container {
-            max-width: 680px;
-            margin: 0 auto;
-            padding: 0 16px;
-            /* 左右留白，上边距由 body 提供 */
-        }
-
-        /* 顶部输入区 */
-        .top-bar {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            margin-bottom: 24px;
-        }
-
-        .search-input {
-            flex: 1;
-            background-color: var(--bg-input);
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            padding: 12px 16px;
-            /* 调大内边距，更舒适 */
-            font-size: 16px;
-            color: var(--text-primary);
-            outline: none;
-            transition: border 0.15s;
-        }
-
-        .search-input:focus {
-            border-color: #555;
-        }
-
-        .search-input::placeholder {
-            color: var(--text-secondary);
-        }
-
-        .search-btn {
-            padding: 12px 20px;
-            background-color: var(--accent);
-            color: var(--bg-primary);
-            /* 注意这里分号 */
-            border: none;
-            border-radius: 8px;
-            font-size: 18px;
-            cursor: pointer;
-            white-space: nowrap;
-            transition: 0.1s;
-        }
-
-        .search-btn:hover {
-            opacity: 0.9;
-        }
-
-        /* 工具栏 */
-        .toolbar {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 8px 0 16px;
-            border-bottom: 1px solid var(--border);
-            margin-bottom: 16px;
-        }
-
-        .icon {
-            font-size: 20px;
-            color: var(--text-secondary);
-            cursor: pointer;
-            background: transparent;
-            width: auto;
-            height: auto;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
-        }
-
-        .icon:hover {
-            color: var(--accent);
-        }
-
-        .icon.active {
-            color: var(--accent);
-        }
-
-        /* 卡片流 */
-        .note-card {
-            background-color: var(--bg-card);
-            border-radius: 8px;
-            padding: 16px;
-            margin-bottom: 12px;
-            transition: background 0.15s, border 0.2s, margin 0.2s;
-            cursor: pointer;
-            animation: fadeIn 0.6s ease-in-out;
-            animation-fill-mode: backwards;
-        }
-
-        .note-card:hover {
-            background-color: var(--card-hover);
-        }
-
-        .note-content {
-            font-size: 16px;
-            color: var(--text-primary);
-            line-height: 1.6;
-            margin-bottom: 12px;
-            /* 3行截断 */
-            display: -webkit-box;
-            -webkit-line-clamp: 3;
-            -webkit-box-orient: vertical;
-            overflow: hidden;
-            word-break: break-word;
-        }
-
-        .note-time {
-            font-size: 12px;
-            color: var(--text-secondary);
-            text-align: left;
-        }
-
-        /* 淡出动画 */
-        .note-card.fade-out {
-            opacity: 0;
-            transition: opacity 0.3s ease;
-        }
-
-        .delete-btn:hover {
-            color: var(--danger) !important;
-            transition: color 0.15s;
-        }
-
-        /* 空状态提示（稍后 JS 会用到） */
-        .empty-state {
-            text-align: center;
-            color: var(--text-secondary);
-            padding: 48px 0;
-            font-size: 16px;
-        }
-
-        /* ---------- 模态框（卡片弹出层）---------- */
-        .modal-overlay {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0, 0, 0, 0.5);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            z-index: 1000;
-            opacity: 0;
-            visibility: hidden;
-            transition: opacity 0.2s ease, visibility 0.2s ease;
-        }
-
-        .modal-overlay.active {
-            opacity: 1;
-            visibility: visible;
-        }
-
-        .modal-card {
-            background-color: var(--bg-card);
-            color: var(--text-primary);
-            border-radius: 12px;
-            padding: 24px;
-            max-width: 600px;
-            width: 90%;
-            max-height: 80vh;
-            overflow-y: auto;
-            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
-            border: 1px solid var(--border);
-        }
-
-        .modal-content {
-            font-size: 18px;
-            line-height: 1.6;
-            margin-bottom: 20px;
-            white-space: pre-wrap;
-            word-break: break-word;
-        }
-
-        .modal-time {
-            font-size: 14px;
-            color: var(--text-secondary);
-            margin-bottom: 16px;
-        }
-
-        .modal-close-btn {
-            display: inline-block;
-            padding: 8px 16px;
-            background-color: var(--accent);
-            color: var(--bg-primary);
-            border: none;
-            border-radius: 6px;
-            cursor: pointer;
-            font-size: 14px;
-            transition: opacity 0.15s;
-        }
-
-        .modal-close-btn:hover {
-            opacity: 0.8;
-        }
-
-        .toolbar-search-input {
-            background-color: var(--bg-input);
-            color: var(--text-primary);
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            padding: 6px 12px;
-            cursor: pointer;
-            font-size: 16px;
-            transition: border 0.15s, width 0.2s ease;
-            outline: none;
-            width: 100%;
-            box-sizing: border-box;
-        }
-
-        .toolbar-search-input:focus {
-            border-color: #555
-        }
-
-        .toolbar-search-input::placeholder {
-            color: var(--text-secondary);
-        }
-
-        /*移动端适配：宽度自适应*/
-        @media (max-width: 480px) {
-            .toolbar-search-input {
-                width: 100%;
-            }
-        }
-
-        /*搜索关键词高亮*/
-        mark {
-            background-color: #ffeb3b;
-            color: #1a1a1a;
-            padding: 0 2px;
-            border-radius: 2px;
-        }
-
-        /*深色主体下关键词高亮*/
-        .dark-theme mark {
-            background-color: #f9a825;
-            color: #1a1a1a;
-        }
-
-        /* 搜索框容器（用于定位清除按钮） */
-        .search-container {
-            position: relative;
-            display: block;
-            flex: 1;
-            min-width: 0;
-        }
-
-        /* 清除按钮样式 */
-        .search-clear {
-            position: absolute;
-            right: 8px;
-            top: 50%;
-            transform: translateY(-50%);
-            color: var(--text-secondary);
-            cursor: pointer;
-            font-size: 16px;
-            line-height: 1;
-            padding: 4px;
-            border-radius: 50%;
-            transition: background-color 0.15s;
-            z-index: 2;
-        }
-
-        .search-clear:hover {
-            background-color: rgba(128, 128, 128, 0.2);
-            color: var(--accent);
-        }
-
-        /* 深色主题下 hover 效果适配 */
-        .dark-theme .search-clear:hover {
-            background-color: rgba(255, 255, 255, 0.1);
-        }
-
-        @keyframes fadeIn {
-            from {
-                opacity: 0;
-            }
-
-            to {
-                opacity: 1;
-            }
-        }
-
-        /* ---------- 设置下拉菜单 ---------- */
-        .settings-toggle {
-            /* 与普通图标一致，无需额外样式 */
-        }
-
-        .settings-dropdown {
-            position: absolute;
-            top: 100%;
-            /* 位于图标下方 */
-            right: 0;
-            /* 右对齐 */
-            background-color: var(--bg-card);
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            padding: 8px 0;
-            min-width: 150px;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-            z-index: 1001;
-            /* 高于模态框的背景？但模态框 z-index 是 1000，这里稍高确保在下拉时不被遮挡 */
-        }
-
-        .settings-item {
-            display: block;
-            width: 100%;
-            padding: 10px 16px;
-            background: none;
-            border: none;
-            text-align: left;
-            font-size: 14px;
-            color: var(--text-primary);
-            cursor: pointer;
-            transition: background 0.15s;
-        }
-
-        .settings-item:hover {
-            background-color: var(--card-hover);
-        }
-
-        /* 深色主题适配 */
-        .dark-theme .settings-dropdown {
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
-        }
-
-        /* ---------- 首次使用引导 ---------- */
-        .welcome-overlay {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0, 0, 0, 0.5);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            z-index: 2000;
-            /* 高于模态框 */
-            opacity: 0;
-            visibility: hidden;
-            transition: opacity 0.2s ease, visibility 0.2s ease;
-        }
-
-        .welcome-overlay.active {
-            opacity: 1;
-            visibility: visible;
-        }
-
-        .welcome-card {
-            background-color: var(--bg-card);
-            color: var(--text-primary);
-            border-radius: 12px;
-            padding: 24px;
-            max-width: 400px;
-            width: 90%;
-            text-align: center;
-            border: 1px solid var(--border);
-            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
-        }
-
-        .welcome-content {
-            font-size: 18px;
-            line-height: 1.6;
-            margin-bottom: 24px;
-        }
-
-        .welcome-btn {
-            background-color: var(--accent);
-            color: var(--bg-primary);
-            border: none;
-            border-radius: 8px;
-            padding: 12px 24px;
-            font-size: 16px;
-            cursor: pointer;
-            transition: opacity 0.15s;
-        }
-
-        .welcome-btn:hover {
-            opacity: 0.8;
-        }
-
-        .related-note-item {
-            padding: 8px 0;
-            border-bottom: 1px dashed var(--border);
-            cursor: pointer;
-            font-size: 14px;
-            color: var(--text-primary);
-        }
-
-        .related-note-item:last-child {
-            border-bottom: none;
-        }
-
-        .related-note-item:hover {
-            background-color: var(--card-hover);
-        }
-    </style>
+    <title>MindSpark Lite</title>
+    <meta name="description" content="MindSpark - 和自己的想法重逢。一个简洁的 AI 辅助想法管理工具。">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Caveat:wght@400;700&family=Quicksand:wght@400;500;600&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="mindspark_lite.css">
 </head>
 
 <body>
-
     <div class="container">
-        <!-- 场景 1: 输入框 + 按钮 -->
-        <div class="top-bar">
-            <input type="text" class="search-input" placeholder="写下你的思考">
-            <button class="search-btn">↵</button>
-        </div>
-
-        <!-- 场景 2: 左一个图标，右一个图标 -->
-        <!-- 工具栏 -->
-        <div class="toolbar">
-            <!-- 左侧组：搜索图标 + 搜索框容器（可伸缩） -->
-            <div style="display: flex; gap: 16px; align-items: center; flex: 1;margin-right: 16px;">
-                <div class="icon search-icon" id="searchIcon">🔍</div>
-                <div class="search-container" id="searchContainer" style="display: none;">
-                    <input type="text" class="toolbar-search-input" id="searchBox" placeholder="找找看"
-                        style="width: 100%; padding-right: 30px;">
-                    <span class="search-clear" id="searchClear"
-                        style="position: absolute; right: 8px; top: 50%; transform: translateY(-50%); cursor: pointer; display: none;">✕</span>
+        <!-- Sticky Header -->
+        <div class="sticky-header">
+            <header>
+                <div style="display:flex; align-items:center; gap:12px;">
+                    <div>
+                        <h1>MindSpark</h1>
+                        <div class="subtitle">和自己的想法重逢</div>
+                    </div>
                 </div>
+                <div style="display:flex; gap:8px;">
+                    <button onclick="openSettings()" id="settingsBtn" title="设置">⚙️</button>
+                    <button onclick="toggleTheme()" id="themeBtn" title="切换主题">🌙</button>
+                </div>
+            </header>
+
+            <!-- Trigger Bar -->
+            <div class="input-trigger" onclick="openNoteModal()" id="note-input-area">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                    stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 20h9"></path>
+                    <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+                </svg>
+                <span style="font-size: 15px;">写点什么... (Ctrl + N)</span>
             </div>
 
-            <!-- 右侧组：排序图标 + 主题图标 + 设置图标（带下拉） -->
-            <div style="display: flex; gap: 16px; align-items: center; position: relative;">
-                <div class="icon sort-toggle" data-mode="random" title="随机排列">🔄</div>
-                <div class="icon sort-toggle" data-mode="time" title="按时间排序">📅</div>
-                <div class="icon theme-toggle" aria-label="切换到深色主题" role="button" tabindex="0">🌙</div>
-
-                <!-- 设置图标和下拉菜单 -->
-                <div class="icon settings-toggle" id="settingsToggle" title="设置">⚙️</div>
-                <div class="settings-dropdown" id="settingsDropdown" style="display: none;">
-                    <button class="settings-item" id="exportJsonBtn">导出 JSON</button>
-                    <button class="settings-item" id="exportMarkdownBtn">导出 Markdown</button>
-                    <button class="settings-item" id="importJsonBtn">导入 JSON</button>
-                    <button class="settings-item" id="importMarkdownBtn">导入 Markdown</button>
-                    <button class="settings-item" id="openAiSettingsBtn">🤖 AI 设置</button>
+            <div class="controls">
+                <input type="text" id="searchInput" placeholder="搜索想法..." 
+            style="max-width: 200px; margin-bottom:0;">
+                <div style="display:flex; gap:8px;">
+                    <button onclick="setSort('time')" id="sortTimeBtn" style="color:var(--accent)">时间</button>
+                    <button onclick="setSort('random')" id="sortRandomBtn">随机</button>
                 </div>
             </div>
         </div>
 
-        <!-- 隐藏的文件输入（用于导入） -->
-        <input type="file" id="importFileInput" accept=".json" style="display: none;">
-        <input type="file" id="importMarkdownFileInput" accept=".md" style="display: none;">
-
-        <!--首次使用引导-->
-        <div class="welcome-overlay" id="welcomeOverlay">
-            <div class="welcome-card">
-                <h2 style="margin-top: 0; color: var(--text-primary);">欢迎使用！</h2>
-                <p style="color: var(--text-secondary); line-height: 1.6;">
-                    这是一个极简的收集、记录你零散想法的工具，它会随机显示你过去记录的想法。你可以随时记录想法，也可以随时导出备份。
-                </p>
-                <div style="margin-top: 20px; display: flex; gap: 12px; justify-content: flex-end;">
-                    <button class="modal-close-btn" id="welcomeBtn">开始使用</button>
-                </div>
-            </div>
+        <div id="noteList" class="note-list"></div>
+        <div id="emptyState" class="empty-state" style="display:none">
+            <div class="empty-icon">💡</div>
+            <div class="empty-title">还没有任何想法</div>
+            <div class="empty-desc">点击上方的输入框，写下你的第一个灵感吧</div>
         </div>
 
-        <!-- 场景 3: 笔记栏 -->
+        <!-- Load More Button -->
+        <div  id ="loadMoreContainer" style="text-align: center; margin-top:20px;">
+            <button id="loadMoreBtn" class="secondary-btn" style="display:none;" onclick="loadMoreNotes()">加载更多</button>
+        </div>
+
+        <!-- Note Stats Footer -->
+        <div id="noteStats" class="note-stats"></div>
     </div>
-    <!-- 模态框 -->
-    <div class="modal-overlay" id="modalOverlay">
-        <div class="modal-card">
-            <!-- 内容显示区（查看模式） -->
-            <div class="modal-content" id="modalContent"></div>
-            <div class="modal-time" id="modalTime"></div>
 
-            <!-- 编辑模式：文本输入框（默认隐藏） -->
-            <textarea id="modalEditTextarea" class="modal-edit-textarea"
-                style="display: none; width: 100%; min-height: 150px; padding: 12px; background: var(--bg-input); color: var(--text-primary); border: 1px solid var(--border); border-radius: 8px; font-size: 16px; line-height: 1.6; resize: vertical;"></textarea>
-
-            <!-- 按钮组 -->
-            <div style="display: flex; gap: 12px; justify-content: flex-end; margin-top: 16px;">
-                <!-- 查看模式按钮 -->
-                <button class="modal-close-btn" id="modalCloseBtn">关闭</button>
-                <button class="modal-edit-btn" id="modalEditBtn"
-                    style="background: var(--accent); color: var(--bg-primary); border: none; border-radius: 6px; padding: 8px 16px; cursor: pointer; font-size: 14px;">编辑</button>
-                <!-- 编辑模式按钮（默认隐藏） -->
-                <button class="modal-save-btn" id="modalSaveBtn"
-                    style="display: none; background: var(--accent); color: var(--bg-primary); border: none; border-radius: 6px; padding: 8px 16px; cursor: pointer; font-size: 14px;">保存</button>
-                <button class="modal-cancel-btn" id="modalCancelBtn"
-                    style="display: none; background: transparent; color: var(--text-secondary); border: 1px solid var(--border); border-radius: 6px; padding: 8px 16px; cursor: pointer; font-size: 14px;">取消</button>
+    <!-- Note Create Modal -->
+    <div id="noteModal" class="modal-overlay" onclick="closeNoteModal()">
+        <div class="modal-box" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <h3 class="modal-title">新想法</h3>
+                <button onclick="closeNoteModal()">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                        stroke-linecap="round" stroke-linejoin="round">
+                        <line x1="18" y1="6" x2="6" y2="18"></line>
+                        <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
+                </button>
             </div>
-            <div class="related-notes" id="relatedNotes"
-                style="margin-top: 20px; border-top: 1px solid var(--border); padding-top: 16px; display: none;">
-                <div style="font-size: 14px; color: var(--text-secondary); margin-bottom: 12px;">相关想法</div>
-                <div id="relatedNotesList"></div>
+
+            <textarea id="noteInput" class="modal-textarea" placeholder="写点什么..."></textarea>
+
+            <div style="display: flex; justify-content: flex-end; gap: 12px; align-items: center;">
+                <span id="charCount" style="font-size: 13px; color: var(--text-secondary);">0 字</span>
+                <button class="primary-btn" onclick="saveNote()" id="saveBtn">
+                    保存 (Ctrl+Enter)
+                </button>
             </div>
         </div>
     </div>
 
-    <!-- AI 设置模态框 -->
-    <div class="modal-overlay" id="aiSettingsOverlay">
-        <div class="modal-card" style="max-width: 500px;">
-            <h3 style="margin-bottom: 16px;">AI 设置</h3>
-            <div style="margin-bottom: 16px;">
-                <label style="display: block; margin-bottom: 4px;">API 服务商</label>
-                <select id="apiProvider" class="search-input" style="width: 100%;">
-                    <option value="openai">OpenAI</option>
-                    <option value="siliconflow">硅基流动</option>
+    <!-- Note Detail Modal -->
+    <div id="detailModal" class="modal-overlay" onclick="closeDetailModal()">
+        <div class="modal-box detail-modal-box" onclick="event.stopPropagation()">
+            <!-- Detail Header -->
+            <div class="detail-header">
+                <div id="detailTime" class="detail-time"></div>
+                <div class="detail-actions">
+                    <!-- Normal Mode Actions -->
+                    <div id="detailNormalActions">
+                        <div id="deleteConfirmGroup" style="display:none;">
+                            <span style="font-size:14px; color:var(--danger);">确认删除？</span>
+                            <button onclick="executeDeleteNote()" class="danger-small-btn">是</button>
+                            <button onclick="cancelDeleteNote()" class="secondary-small-btn">否</button>
+                        </div>
+                        <button id="deleteBtn" onclick="confirmDeleteNote()" title="删除" class="icon-btn">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M3 6h18"></path>
+                                <path
+                                    d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2">
+                                </path>
+                            </svg>
+                        </button>
+                        <button onclick="startEditNote()" title="编辑" class="icon-btn">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+                            </svg>
+                        </button>
+                    </div>
+                    <!-- Edit Mode Actions -->
+                    <div id="detailEditActions" style="display:none;">
+                        <button onclick="cancelEditNote()" class="secondary-btn" style="font-size:14px;">取消</button>
+                        <button onclick="saveEditNote()" class="primary-btn" id="editSaveBtn"
+                            style="font-size:14px; padding:6px 16px;">完成</button>
+                    </div>
+                    <button onclick="closeDetailModal()" title="关闭" class="icon-btn" style="margin-left:12px;">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="18" y1="6" x2="6" y2="18"></line>
+                            <line x1="6" y1="6" x2="18" y2="18"></line>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Detail Content -->
+            <div class="detail-content">
+                <div id="detailViewContent" class="detail-view-content"></div>
+                <textarea id="detailEditContent" class="detail-edit-textarea" style="display:none;"></textarea>
+
+                <!-- Related Notes Section -->
+                <div id="detailRelated" class="detail-related">
+                    <h4 class="detail-related-title">✨ 相关想法</h4>
+                    <div id="detailRelatedList"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Settings Modal -->
+    <div id="settingsModal" class="modal-overlay" onclick="closeSettings()">
+        <div class="modal-box" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <h3 class="modal-title">设置</h3>
+                <button onclick="closeSettings()">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                        stroke-linecap="round" stroke-linejoin="round">
+                        <line x1="18" y1="6" x2="6" y2="18"></line>
+                        <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
+                </button>
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">AI 提供商</label>
+                <div style="font-size:13px; color:var(--text-secondary); margin-bottom:12px;">
+                    选择预设或自定义 API 配置。新笔记会自动嵌入向量。
+                </div>
+
+                <label class="form-label">选择供应商</label>
+                <select id="providerSelect" onchange="onProviderChange()" class="form-select">
                     <option value="custom">自定义</option>
+                    <option value="openai">OpenAI</option>
+                    <option value="gemini">Google Gemini</option>
+                    <option value="deepseek">DeepSeek</option>
+                    <option value="siliconflow">SiliconFlow (硅基流动)</option>
                 </select>
             </div>
-            <div style="margin-bottom: 16px;" id="customApiUrlGroup" style="display: none;">
-                <label style="display: block; margin-bottom: 4px;">API 地址</label>
-                <input type="text" id="customApiUrl" class="search-input" placeholder="https://api.example.com/v1">
+
+            <div class="form-group">
+                <label class="form-label">API Base URL</label>
+                <input type="text" id="apiBaseUrl" placeholder="https://api.openai.com/v1"
+                    value="https://api.openai.com/v1">
             </div>
-            <div style="margin-bottom: 16px;">
-                <label style="display: block; margin-bottom: 4px;">API Key</label>
-                <input type="password" id="apiKey" class="search-input" placeholder="sk-...">
+
+            <div class="form-group">
+                <label class="form-label">API Key</label>
+                <input type="password" id="apiKey" placeholder="sk-...">
             </div>
-            <div style="margin-bottom: 16px;">
-                <label style="display: block; margin-bottom: 4px;">模型名称</label>
-                <input type="text" id="embeddingModel" class="search-input" placeholder="text-embedding-3-small">
+
+            <div class="form-group">
+                <label class="form-label">Embedding Model</label>
+                <input type="text" id="apiModel" placeholder="text-embedding-3-small" value="text-embedding-3-small">
             </div>
-            <div style="display: flex; gap: 12px; justify-content: flex-end;">
-                <button class="modal-close-btn" id="testApiBtn">测试连接</button>
-                <button class="modal-close-btn" id="saveApiSettingsBtn">保存</button>
-                <button class="modal-close-btn" id="closeAiSettingsBtn">取消</button>
+
+            <div style="display:flex; justify-content:flex-end; gap:8px;">
+                <button class="secondary-btn" onclick="closeSettings()">取消</button>
+                <button class="secondary-btn" onclick="testApiConnection()">测试连接</button>
+                <button class="primary-btn" onclick="saveSettings()">保存配置</button>
+            </div>
+
+            <hr class="divider">
+
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                <span style="font-size:14px; font-weight:600;">数据备份与恢复</span>
+                <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                    <button class="secondary-btn" onclick="exportData()">导出 JSON</button>
+                    <button class="secondary-btn" onclick="exportMarkdown()">导出 MD</button>
+                    <button class="secondary-btn" onclick="document.getElementById('importFile').click()">导入
+                        JSON</button>
+                    <button class="secondary-btn" onclick="document.getElementById('importMdFile').click()">导入
+                        MD</button>
+                    <input type="file" id="importFile" accept=".json" style="display:none" onchange="importData(event)">
+                    <input type="file" id="importMdFile" accept=".md,.markdown,.txt" style="display:none" multiple
+                        onchange="importMdFiles(event)">
+                </div>
+            </div>
+
+            <hr class="divider">
+
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <span style="font-size:14px; font-weight:600;">处理旧笔记向量</span>
+                <button class="secondary-btn" onclick="processAllNotes()" id="processBtn">开始处理</button>
+            </div>
+            <div id="processStatus" style="font-size:12px; color:var(--text-secondary); margin-top:8px;"></div>
+        </div>
+    </div>
+
+    <!-- Onboarding Modal -->
+    <div id="onboardingModal" class="modal-overlay">
+        <div class="onboarding-backdrop" onclick="skipOnboarding()"></div>
+        <div class="onboarding-card">
+            <button onclick="skipOnboarding()" class="onboarding-close">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                    stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+            </button>
+            <h3 id="onboardingTitle" class="onboarding-title"></h3>
+            <p id="onboardingContent" class="onboarding-content"></p>
+            <div class="onboarding-footer">
+                <div id="onboardingDots" class="onboarding-dots"></div>
+                <button id="onboardingNextBtn" onclick="nextOnboardingStep()" class="primary-btn"
+                    style="padding:8px 18px; font-size:14px;"></button>
             </div>
         </div>
     </div>
+
+    <!-- Toast Container -->
+    <div id="toastContainer" class="toast-container"></div>
 
     <script src="script.js"></script>
 </body>
