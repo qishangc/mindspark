@@ -11,6 +11,7 @@ let isEditing = false;
 let currentSourceType = 'none';
 let currentSourceImage = null;
 let displayCount = 20;
+let showArchived = false;
 // 当前显示的笔记数量
 
 // --- AI Provider Presets ---
@@ -23,7 +24,7 @@ const AI_PROVIDERS = {
     gemini: {
         name: 'Google Gemini',
         baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
-        model: 'text-embedding-004'
+        model: 'gemini-embedding-001'
     },
     deepseek: {
         name: 'DeepSeek',
@@ -349,6 +350,12 @@ function openDetailModal(noteId) {
     document.getElementById('detailEditContent').style.display = 'none';
     renderDetailSource(note);
 
+    // Update archive button icon
+    const archiveBtn = document.getElementById('archiveBtn');
+    if (archiveBtn) {
+        archiveBtn.title = note.archived ? '取消归档' : '归档';
+    }
+
     // Reset actions
     document.getElementById('detailNormalActions').style.display = 'flex';
     document.getElementById('detailEditActions').style.display = 'none';
@@ -448,6 +455,41 @@ function executeDeleteNote() {
     closeDetailModal();
     renderNotes();
     showToast('想法已删除', 'info');
+}
+
+function toggleArchiveNote() {
+    const note = notes.find(n => n.id === currentDetailNoteId);
+    if (!note) return;
+    note.archived = !note.archived;
+    saveNotes();
+    closeDetailModal();
+    renderNotes();
+    showToast(note.archived ? '已归档 📦' : '已取消归档', 'info');
+}
+
+function toggleArchiveView() {
+    showArchived = !showArchived;
+    displayCount = 20;
+
+    const subtitle = document.querySelector('.subtitle');
+    const toggleBtn = document.getElementById('archiveToggleBtn');
+    const inputTrigger = document.getElementById('note-input-area');
+
+    if (showArchived) {
+        subtitle.textContent = '归档的想法';
+        toggleBtn.style.background = 'var(--accent)';
+        toggleBtn.style.color = 'var(--text-on-accent)';
+        toggleBtn.style.borderRadius = '10px';
+        inputTrigger.style.display = 'none';
+    } else {
+        subtitle.textContent = '和自己的想法重逢';
+        toggleBtn.style.background = '';
+        toggleBtn.style.color = '';
+        toggleBtn.style.borderRadius = '';
+        inputTrigger.style.display = '';
+    }
+
+    renderNotes();
 }
 
 function renderRelatedNotes(note) {
@@ -675,7 +717,7 @@ function getRelatedNotes(targetNote) {
 
     // 计算所有候选笔记的相似度
     let candidates = notes
-        .filter(n => n.id !== targetNote.id && n.embedding)
+        .filter(n => n.id !== targetNote.id && n.embedding && !n.archived)
         .map(n => ({
             ...n,
             similarity: cosineSimilarity(targetNote.embedding, n.embedding)
@@ -949,7 +991,11 @@ function getSourceBadge(note) {
 // ============================================
 function renderNotes() {
     const query = search.value.toLowerCase();
-    let displayNotes = notes.filter(n => n.content.toLowerCase().includes(query));
+    let displayNotes = notes.filter(n => {
+        const matchArchive = showArchived ? !!n.archived : !n.archived;
+        const matchQuery = n.content.toLowerCase().includes(query);
+        return matchArchive && matchQuery;
+    });
 
     if (sortMode === 'random' && !query) {
         displayNotes = [...displayNotes].sort(() => Math.random() - 0.5);
@@ -996,9 +1042,14 @@ function renderNotes() {
 
     // 统计信息
     const stats = document.getElementById('noteStats');
-    const totalNotes = notes.length;
-    const embeddedCount = notes.filter(n => n.embedding).length;
-    stats.textContent = `共 ${totalNotes} 条想法${embeddedCount > 0 ? ` · ${embeddedCount} 条已嵌入向量` : ''}`;
+    const activeNotes = notes.filter(n => !n.archived);
+    const archivedNotes = notes.filter(n => n.archived);
+    const totalNotes = activeNotes.length;
+    const embeddedCount = activeNotes.filter(n => n.embedding).length;
+    let statsText = `共 ${totalNotes} 条想法`;
+    if (embeddedCount > 0) statsText += ` · ${embeddedCount} 条已嵌入向量`;
+    if (archivedNotes.length > 0) statsText += ` · ${archivedNotes.length} 条已归档`;
+    stats.textContent = statsText;
 
     // 控制加载更多按钮
     updateLoadMoreButton(displayNotes.length);
@@ -1041,6 +1092,7 @@ function normalizeNote(note) {
     normalized.source_meta = normalized.source_meta && typeof normalized.source_meta === 'object'
         ? normalized.source_meta
         : null;
+    if (typeof normalized.archived !== 'boolean') normalized.archived = false;
     return normalized;
 }
 
