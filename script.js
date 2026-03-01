@@ -3,36 +3,14 @@
 // ============================================
 
 // --- State ---
-function safeParse(key, fallbackJson) {
-    try {
-        return JSON.parse(localStorage.getItem(key) || fallbackJson);
-    } catch {
-        return JSON.parse(fallbackJson);
-    }
-}
-
-function normalizeNotes(rawNotes) {
-    if (!Array.isArray(rawNotes)) return [];
-    return rawNotes
-        .filter(n => n && typeof n === 'object' && typeof n.content === 'string' && n.content.trim())
-        .map(n => ({
-            id: n.id ? String(n.id) : Date.now().toString(),
-            content: n.content,
-            created_at: n.created_at || new Date().toISOString(),
-            embedding: Array.isArray(n.embedding) ? n.embedding : null,
-            view_count: Number.isFinite(n.view_count) ? n.view_count : 0
-        }));
-}
-
-let notes = normalizeNotes(safeParse('mindspark_notes', '[]'));
-let settings = safeParse('mindspark_settings', '{}');
-if (!settings || typeof settings !== 'object' || Array.isArray(settings)) {
-    settings = {};
-}
+let notes = JSON.parse(localStorage.getItem('mindspark_notes') || '[]');
+let settings = JSON.parse(localStorage.getItem('mindspark_settings') || '{}');
 let sortMode = 'time';
 let currentDetailNoteId = null;
 let isEditing = false;
-let displayCount = 20;          
+let currentSourceType = 'none';
+let currentSourceImage = null;
+let displayCount = 20;
 // 当前显示的笔记数量
 
 // --- AI Provider Presets ---
@@ -69,6 +47,12 @@ const noteInput = document.getElementById('noteInput');
 const list = document.getElementById('noteList');
 const empty = document.getElementById('emptyState');
 const search = document.getElementById('searchInput');
+const sourceUrlInput = document.getElementById('sourceUrlInput');
+const sourceImageInput = document.getElementById('sourceImageInput');
+const sourcePreview = document.getElementById('sourcePreview');
+const sourceTextInput = document.getElementById('sourceTextInput');
+
+notes = normalizeNotes(notes);
 
 // --- Init Theme ---
 if (localStorage.getItem('theme') === 'dark') {
@@ -120,11 +104,99 @@ function showToast(message, type = 'info') {
 // ============================================
 // Note Create Modal
 // ============================================
+function setSourceType(type) {
+    currentSourceType = type;
+    document.querySelectorAll('.source-tab').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.sourceType === type);
+    });
+    document.getElementById('sourceUrlGroup').style.display = type === 'url' ? 'block' : 'none';
+    document.getElementById('sourceImageGroup').style.display = type === 'image' ? 'block' : 'none';
+    document.getElementById('sourceTextGroup').style.display = type === 'text' ? 'block' : 'none';
+}
+
+function resetSourceInputs() {
+    currentSourceImage = null;
+    if (sourceUrlInput) sourceUrlInput.value = '';
+    if (sourceImageInput) sourceImageInput.value = '';
+    if (sourceTextInput) sourceTextInput.value = '';
+    if (sourcePreview) {
+        sourcePreview.style.display = 'none';
+        sourcePreview.innerHTML = '';
+    }
+    setSourceType('none');
+}
+
+function fileToDataUrl(file) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(new Error('读取图片失败'));
+        reader.readAsDataURL(file);
+    });
+}
+
+async function setSourceImageFile(file) {
+    if (!file || !file.type.startsWith('image/')) {
+        showToast('请选择图片文件', 'error');
+        return;
+    }
+    const dataUrl = await fileToDataUrl(file);
+    currentSourceImage = {
+        dataUrl,
+        meta: {
+            name: file.name || 'clipboard-image.png',
+            size: file.size || 0,
+            mime: file.type || 'image/png'
+        }
+    };
+    setSourceType('image');
+    sourcePreview.style.display = 'block';
+    sourcePreview.innerHTML = `
+        <img src="${dataUrl}" alt="source preview">
+        <div style="font-size:12px; color:var(--text-secondary);">${escapeHtml(currentSourceImage.meta.name)}</div>
+    `;
+}
+
+async function handleSourceImageSelect(event) {
+    const file = event.target.files && event.target.files[0];
+    if (!file) return;
+    try {
+        await setSourceImageFile(file);
+    } catch (err) {
+        showToast(err.message || '处理图片失败', 'error');
+    }
+}
+
+async function collectSourceData() {
+    if (currentSourceType === 'url') {
+        let url = (sourceUrlInput?.value || '').trim();
+        if (!url) return { source_type: 'none', source_url: '', source_meta: null };
+        if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
+        return { source_type: 'url', source_url: url, source_meta: null };
+    }
+
+    if (currentSourceType === 'image' && currentSourceImage?.dataUrl) {
+        return {
+            source_type: 'image',
+            source_url: currentSourceImage.dataUrl,
+            source_meta: currentSourceImage.meta || null
+        };
+    }
+
+    if (currentSourceType === 'text') {
+        const text = (sourceTextInput?.value || '').trim();
+        if (!text) return { source_type: 'none', source_url: '', source_meta: null };
+        return { source_type: 'text', source_url: '', source_meta: { title: text } };
+    }
+
+    return { source_type: 'none', source_url: '', source_meta: null };
+}
+
 function openNoteModal() {
-    closeOnboardingIfOpen();
     const modal = document.getElementById('noteModal');
     modal.classList.add('open');
     noteInput.value = '';
+    resetSourceInputs();
     document.getElementById('charCount').textContent = '0 字';
     setTimeout(() => noteInput.focus(), 50);
 }
@@ -146,6 +218,24 @@ noteInput.addEventListener('keydown', (e) => {
     }
 });
 
+noteInput.addEventListener('paste', async (e) => {
+    const items = e.clipboardData?.items || [];
+    for (const item of items) {
+        if (item.type && item.type.startsWith('image/')) {
+            e.preventDefault();
+            const file = item.getAsFile();
+            if (!file) return;
+            try {
+                await setSourceImageFile(file);
+                showToast('已粘贴图片来源', 'success');
+            } catch (err) {
+                showToast(err.message || '粘贴图片失败', 'error');
+            }
+            return;
+        }
+    }
+});
+
 async function saveNote() {
     const content = noteInput.value.trim();
     if (!content) return;
@@ -164,12 +254,16 @@ async function saveNote() {
             }
         }
 
+        const sourceData = await collectSourceData();
         const note = {
             id: Date.now().toString(),
             content,
             created_at: new Date().toISOString(),
             embedding,
-            view_count: 0
+            view_count: 0,
+            source_type: sourceData.source_type,
+            source_url: sourceData.source_url,
+            source_meta: sourceData.source_meta
         };
 
         notes.unshift(note);
@@ -196,8 +290,48 @@ function debounce(func, wait) {
 // ============================================
 // Note Detail Modal
 // ============================================
+function renderDetailSource(note) {
+    const container = document.getElementById('detailSource');
+    if (!container) return;
+
+    const sourceType = note.source_type || 'none';
+    const sourceUrl = note.source_url || '';
+    const sourceMeta = note.source_meta || {};
+
+    if (sourceType === 'url' && sourceUrl) {
+        container.style.display = 'block';
+        container.innerHTML = `
+            <div class="detail-source-title">触发源</div>
+            <a class="detail-source-link" href="${escapeHtml(sourceUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(sourceUrl)}</a>
+        `;
+        return;
+    }
+
+    if (sourceType === 'image' && sourceUrl) {
+        const filename = sourceMeta.name ? escapeHtml(sourceMeta.name) : '图片来源';
+        container.style.display = 'block';
+        container.innerHTML = `
+            <div class="detail-source-title">触发源</div>
+            <img class="detail-source-image" src="${sourceUrl}" alt="${filename}">
+            <div style="margin-top:8px; color:var(--text-secondary); font-size:12px;">${filename}</div>
+        `;
+        return;
+    }
+
+    if (sourceType === 'text' && sourceMeta.title) {
+        container.style.display = 'block';
+        container.innerHTML = `
+            <div class="detail-source-title">触发源</div>
+            <div class="detail-source-text">${escapeHtml(sourceMeta.title)}</div>
+        `;
+        return;
+    }
+
+    container.style.display = 'none';
+    container.innerHTML = '';
+}
+
 function openDetailModal(noteId) {
-    closeOnboardingIfOpen();
     const note = notes.find(n => n.id === noteId);
     if (!note) return;
 
@@ -213,6 +347,7 @@ function openDetailModal(noteId) {
     document.getElementById('detailViewContent').textContent = note.content;
     document.getElementById('detailViewContent').style.display = 'block';
     document.getElementById('detailEditContent').style.display = 'none';
+    renderDetailSource(note);
 
     // Reset actions
     document.getElementById('detailNormalActions').style.display = 'flex';
@@ -371,7 +506,6 @@ function setSort(mode) {
 // ============================================
 function openSettings() {
     try {
-        closeOnboardingIfOpen();
         // 重新填充 API 设置（从内存 settings 读取，因为保存时已更新）
         if (settings.apiBaseUrl) document.getElementById('apiBaseUrl').value = settings.apiBaseUrl;
         if (settings.apiKey) document.getElementById('apiKey').value = settings.apiKey;
@@ -404,7 +538,7 @@ function onProviderChange() {
 
 async function testApiConnection() {
     const provider = document.getElementById('providerSelect').value;
-    let apiBaseUrl = document.getElementById('apiBaseUrl').value.trim().replace(/\/$/,'');
+    let apiBaseUrl = document.getElementById('apiBaseUrl').value.trim().replace(/\/$/, '');
     const apiKey = document.getElementById('apiKey').value.trim();
     const apiModel = document.getElementById('apiModel').value.trim();
 
@@ -546,8 +680,8 @@ function getRelatedNotes(targetNote) {
             ...n,
             similarity: cosineSimilarity(targetNote.embedding, n.embedding)
         }))
-        .filter(c => c.similarity > 0.3); 
-        // 先过滤掉极低相似度的
+        .filter(c => c.similarity > 0.3);
+    // 先过滤掉极低相似度的
 
     if (candidates.length === 0) return [];
 
@@ -560,13 +694,13 @@ function getRelatedNotes(targetNote) {
 
     // 动态阈值判断
     if (candidates.length === 1 && top.similarity > 0.6) {
-        return [top]; 
+        return [top];
         // 只有一条且足够好
     } else if (top.similarity - second > 0.15) {
         return [top];
         // 第一条显著突出
     } else if (avgFirstThree > 0.65) {
-        return candidates.slice(0, 3); 
+        return candidates.slice(0, 3);
         // 前几条整体不错
     }
     return [];
@@ -646,7 +780,16 @@ function exportMarkdown() {
             dateStr = new Date().toISOString().slice(0, 10);
             invalidCount++;
         }
-        lines.push(`## ${dateStr}\n\n${note.content}\n\n---`);
+        let sourceLine = '';
+        if (note.source_type === 'url' && note.source_url) {
+            sourceLine = `\n> 🔗 [${note.source_url}](${note.source_url})`;
+        } else if (note.source_type === 'image') {
+            const name = (note.source_meta && note.source_meta.name) || '图片';
+            sourceLine = `\n> 📸 ${name}`;
+        } else if (note.source_type === 'text' && note.source_meta?.title) {
+            sourceLine = `\n> 📝 ${note.source_meta.title}`;
+        }
+        lines.push(`## ${dateStr}\n\n${note.content}${sourceLine}\n\n---`);
     });
     if (invalidCount > 0) {
         console.warn(`导出 MD 时发现 ${invalidCount} 条笔记日期无效，已使用当前日期代替。`);
@@ -675,7 +818,7 @@ function importData(event) {
             data.forEach(n => {
                 if (!existingIds.has(n.id)) {
                     if (n.content && n.created_at) {
-                        notes.push(n);
+                        notes.push(normalizeNote(n));
                         existingIds.add(n.id);
                         count++;
                     }
@@ -711,7 +854,10 @@ function importMdFiles(event) {
                     content,
                     created_at: new Date().toISOString(),
                     embedding: null,
-                    view_count: 0
+                    view_count: 0,
+                    source_type: 'none',
+                    source_url: '',
+                    source_meta: null
                 };
                 notes.unshift(note);
                 count++;
@@ -752,13 +898,6 @@ const ONBOARDING_STEPS = [
 
 let onboardingStep = 0;
 
-function closeOnboardingIfOpen() {
-    const onboardingModal = document.getElementById('onboardingModal');
-    if (onboardingModal && onboardingModal.classList.contains('open')) {
-        onboardingModal.classList.remove('open');
-    }
-}
-
 function initOnboarding() {
     if (localStorage.getItem('mindspark_onboarding_completed')) return;
     setTimeout(() => {
@@ -797,16 +936,20 @@ function skipOnboarding() {
     localStorage.setItem('mindspark_onboarding_completed', 'true');
 }
 
+function getSourceBadge(note) {
+    if (note.source_type === 'url' && note.source_url) return '🔗 链接';
+    if (note.source_type === 'image' && note.source_url) return '🖼️ 图片';
+    if (note.source_type === 'text' && note.source_meta?.title) return '📝 ' + (note.source_meta.title.length > 10 ? note.source_meta.title.slice(0, 10) + '...' : note.source_meta.title);
+    return '';
+}
+
 
 // ============================================
 // Render Notes
 // ============================================
 function renderNotes() {
     const query = search.value.toLowerCase();
-    let displayNotes = notes.filter(n => {
-        const text = typeof n.content === 'string' ? n.content : '';
-        return text.toLowerCase().includes(query);
-    });
+    let displayNotes = notes.filter(n => n.content.toLowerCase().includes(query));
 
     if (sortMode === 'random' && !query) {
         displayNotes = [...displayNotes].sort(() => Math.random() - 0.5);
@@ -828,15 +971,17 @@ function renderNotes() {
     empty.style.display = 'none';
 
     notesToShow.forEach((note, index) => {
-        const contentText = typeof note.content === 'string' ? note.content : '';
         const div = document.createElement('div');
         div.className = 'note-card';
         div.style.animationDelay = `${index * 0.05}s`;
 
         div.innerHTML = `
-            <div class="note-content">${escapeHtml(contentText)}</div>
+            <div class="note-content">${escapeHtml(note.content)}</div>
             <div class="note-meta">
-                <span>${formatDate(note.created_at)}</span>
+                <div class="note-meta-left">
+                    <span>${formatDate(note.created_at)}</span>
+                    ${getSourceBadge(note) ? `<span class="source-badge">${getSourceBadge(note)}</span>` : ''}
+                </div>
                 <button class="delete-btn" onclick="deleteNote('${note.id}', event)">删除</button>
             </div>
         `;
@@ -882,6 +1027,30 @@ function loadMoreNotes() {
 // ============================================
 // Utilities
 // ============================================
+function normalizeNote(note) {
+    const normalized = { ...note };
+    const sourceUrl = typeof normalized.source_url === 'string' ? normalized.source_url : '';
+    let sourceType = normalized.source_type;
+
+    if (sourceType !== 'url' && sourceType !== 'image' && sourceType !== 'text') {
+        sourceType = sourceUrl.startsWith('data:image/') ? 'image' : (sourceUrl ? 'url' : 'none');
+    }
+
+    normalized.source_type = sourceType;
+    normalized.source_url = sourceUrl;
+    normalized.source_meta = normalized.source_meta && typeof normalized.source_meta === 'object'
+        ? normalized.source_meta
+        : null;
+    return normalized;
+}
+
+function normalizeNotes(rawNotes) {
+    if (!Array.isArray(rawNotes)) return [];
+    return rawNotes
+        .filter(n => n && n.content && n.created_at)
+        .map(normalizeNote);
+}
+
 function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;

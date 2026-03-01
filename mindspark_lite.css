@@ -45,6 +45,14 @@ body {
     transition: background 0.3s, color 0.3s;
 }
 
+:where(.container, .sticky-header, header, .modal-box, .detail-header, .detail-content, .note-stats, .empty-state, .note-card, .input-trigger, .source-badge, .source-tab, .related-note, .onboarding-card, .detail-source) {
+    transition: background-color 0.3s, color 0.3s, border-color 0.3s;
+}
+
+:where(input[type="text"], input[type="password"], input[type="search"], input[type="number"], .form-select, .modal-textarea, .detail-edit-textarea, .secondary-small-btn, .secondary-btn, .source-dropzone, .source-preview) {
+    transition: background-color 0.3s, color 0.3s, border-color 0.3s;
+}
+
 .container {
     max-width: 720px;
     margin: 0 auto;
@@ -62,8 +70,10 @@ body {
     z-index: 20;
     display: flex;
     flex-direction: column;
-    gap: 16px;              /* 内部元素间距 */
-    padding: 24px 0 0;       /* 顶部留白 24px，底部不留 */
+    gap: 16px;
+    /* 内部元素间距 */
+    padding: 24px 0 0;
+    /* 顶部留白 24px，底部不留 */
 }
 
 
@@ -181,6 +191,26 @@ button:hover {
     align-items: center;
 }
 
+.note-meta-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+
+.source-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: var(--bg-card-hover);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 2px 8px;
+    font-size: 12px;
+    color: var(--text-secondary);
+    white-space: nowrap;
+}
+
 .delete-btn {
     color: var(--text-secondary) !important;
     font-size: 0.85rem;
@@ -191,12 +221,6 @@ button:hover {
 
 .note-card:hover .delete-btn {
     opacity: 1;
-}
-
-@media (hover: none) {
-    .delete-btn {
-        opacity: 1;
-    }
 }
 
 .delete-btn.confirm {
@@ -352,6 +376,65 @@ input:focus {
 
 .modal-textarea:focus {
     border-color: var(--accent);
+}
+
+.source-picker {
+    margin-bottom: 12px;
+}
+
+.source-tabs {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+
+.source-tab {
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 6px 12px;
+    color: var(--text-secondary);
+    background: transparent;
+}
+
+.source-tab.active {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: var(--bg-card-hover);
+}
+
+.source-panel {
+    margin-bottom: 10px;
+}
+
+.source-dropzone {
+    border: 1px dashed var(--border);
+    border-radius: 12px;
+    padding: 12px;
+    color: var(--text-secondary);
+    text-align: center;
+    cursor: pointer;
+    display: block;
+    background: var(--bg-input);
+}
+
+.source-dropzone:hover {
+    border-color: var(--accent);
+    color: var(--text-primary);
+}
+
+.source-preview {
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 10px;
+    background: var(--bg-input);
+}
+
+.source-preview img {
+    width: 100%;
+    max-height: 220px;
+    object-fit: contain;
+    border-radius: 8px;
+    margin-bottom: 8px;
 }
 
 /* --- Note Detail Modal --- */
@@ -803,4 +886,49 @@ hr.divider {
     .controls input[type="text"] {
         max-width: 100% !important;
     }
+}
+
+.detail-source {
+    margin-bottom: 20px;
+    padding: 12px 16px;
+    border: 1px solid var(--border);
+    background: var(--bg-card-hover);
+    border-radius: 12px;
+    font-size: 14px;
+}
+
+.detail-source-title {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-secondary);
+    margin-bottom: 8px;
+    opacity: 0.6;
+}
+
+.detail-source-link {
+    color: var(--accent);
+    word-break: break-all;
+    text-decoration: none;
+    font-weight: 600;
+}
+
+.detail-source-link:hover {
+    text-decoration: underline;
+}
+
+.detail-source-image {
+    width: 100%;
+    max-height: 320px;
+    object-fit: contain;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+}
+
+.detail-source-text {
+    font-style: italic;
+    border-left: 3px solid var(--border);
+    padding-left: 12px;
+    line-height: 1.5;
+    color: var(--text-primary);
 }

@@ -42,8 +42,7 @@
             </div>
 
             <div class="controls">
-                <input type="text" id="searchInput" placeholder="搜索想法..." 
-            style="max-width: 200px; margin-bottom:0;">
+                <input type="text" id="searchInput" placeholder="搜索想法..." style="max-width: 200px; margin-bottom:0;">
                 <div style="display:flex; gap:8px;">
                     <button onclick="setSort('time')" id="sortTimeBtn" style="color:var(--accent)">时间</button>
                     <button onclick="setSort('random')" id="sortRandomBtn">随机</button>
@@ -59,7 +58,7 @@
         </div>
 
         <!-- Load More Button -->
-        <div  id ="loadMoreContainer" style="text-align: center; margin-top:20px;">
+        <div id="loadMoreContainer" style="text-align: center; margin-top:20px;">
             <button id="loadMoreBtn" class="secondary-btn" style="display:none;" onclick="loadMoreNotes()">加载更多</button>
         </div>
 
@@ -79,6 +78,36 @@
                         <line x1="6" y1="6" x2="18" y2="18"></line>
                     </svg>
                 </button>
+            </div>
+
+            <div class="source-picker">
+                <div class="source-tabs">
+                    <button type="button" class="source-tab active" data-source-type="none"
+                        onclick="setSourceType('none')">无来源</button>
+                    <button type="button" class="source-tab" data-source-type="url"
+                        onclick="setSourceType('url')">链接</button>
+                    <button type="button" class="source-tab" data-source-type="image"
+                        onclick="setSourceType('image')">图片</button>
+                    <button type="button" class="source-tab" data-source-type="text"
+                        onclick="setSourceType('text')">文字</button>
+                </div>
+
+                <div id="sourceUrlGroup" class="source-panel" style="display:none;">
+                    <input type="text" id="sourceUrlInput" placeholder="粘贴链接...">
+                </div>
+
+                <div id="sourceImageGroup" class="source-panel" style="display:none;">
+                    <label class="source-dropzone" for="sourceImageInput" id="sourceDropzone">
+                        <span>点击上传图片，或在输入框中 Ctrl+V 粘贴截图</span>
+                    </label>
+                    <input type="file" id="sourceImageInput" accept="image/*" style="display:none;"
+                        onchange="handleSourceImageSelect(event)">
+                    <div id="sourcePreview" class="source-preview" style="display:none;"></div>
+                </div>
+
+                <div id="sourceTextGroup" class="source-panel" style="display:none;">
+                    <input type="text" id="sourceTextInput" placeholder="如：某本书第 X 页、与朋友聊天时...">
+                </div>
             </div>
 
             <textarea id="noteInput" class="modal-textarea" placeholder="写点什么..."></textarea>
@@ -141,6 +170,7 @@
 
             <!-- Detail Content -->
             <div class="detail-content">
+                <div id="detailSource" class="detail-source" style="display:none;"></div>
                 <div id="detailViewContent" class="detail-view-content"></div>
                 <textarea id="detailEditContent" class="detail-edit-textarea" style="display:none;"></textarea>
 
