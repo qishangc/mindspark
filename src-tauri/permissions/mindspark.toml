@@ -1,0 +1,20 @@
+"$schema" = "./schemas/schema.json"
+
+[[permission]]
+identifier = "mindspark-backend"
+description = "Allows the frontend to access the MindSpark desktop storage commands."
+commands.allow = [
+  "desktop_list_notes",
+  "desktop_create_note",
+  "desktop_update_note",
+  "desktop_delete_note",
+  "desktop_save_all_notes",
+  "desktop_read_settings",
+  "desktop_write_settings",
+  "desktop_import_legacy_json",
+  "desktop_export_notes_json",
+  "desktop_export_notes_markdown",
+  "desktop_write_attachment_from_data_url",
+  "desktop_delete_attachment",
+  "desktop_resolve_attachment_path"
+]

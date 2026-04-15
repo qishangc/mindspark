@@ -1,6 +1,6 @@
 # MindSpark
 
-[在线体验](https://qishangc.github.io/mindspark) | [反馈问题](https://github.com/qishangc/mindspark/issues)
+[反馈问题](https://github.com/qishangc/mindspark/issues)
 
 > **"你只负责想，剩下的交给偶遇。"**
 
@@ -23,7 +23,7 @@
 - **零摩擦输入**：打开就写，没有标题、分类、文件夹。
 - **随机排列**：每次打开都是不同的卡片顺序，让旧想法自己跳出来。
 - **关联推荐**（可选）：配置 Embedding API 后，自动计算笔记间的语义相似度，在阅读时推荐相关想法。
-- **数据存储**：纯前端 + localStorage，无需注册使用
+- **桌面本地存储**：Tauri + 本地 JSON/附件目录，不依赖浏览器 localStorage
 - **深色/浅色主题**，一键切换。
 - **导入/导出**：JSON 或 Markdown，随时备份。
 
@@ -31,16 +31,26 @@
 
 ## 🚀 快速开始
 
-### 直接使用（在线版）
+### 已构建后直接打开
 
-访问 [https://qishangc.github.io/mindspark](https://qishangc.github.io/mindspark)
+```bash
+双击 MindSpark.app
+```
 
-### 克隆项目（完全没必要版）
+`MindSpark.app` 现在会直接启动桌面版二进制，不再打开浏览器版本。
+
+### 首次构建桌面版
 
 ```bash
 git clone https://github.com/qishangc/mindspark.git
-cd mindspark
-双击打开index.html
+cd mindspark/src-tauri
+cargo build
+```
+
+构建完成后，可直接双击仓库根目录的 `MindSpark.app`，或运行：
+
+```bash
+./target/debug/mindspark-desktop
 ```
 
 ## 🤖 AI 智能关联（可选）
@@ -50,11 +60,11 @@ cd mindspark
 3. 点击测试连接，成功后保存。
 4. 之后新建的笔记会自动生成向量，查看笔记时底部会显示“相关想法”。
 
-⚠️ API Key 仅存在你的浏览器里，不会上传到任何服务器。由于前端直接调用 API，请不要把 Key 分享给他人。
+⚠️ API Key 保存在本机桌面应用设置中，不会经过项目自建服务器。由于前端仍会直接请求你配置的 AI 服务，请不要把 Key 分享给他人。
 
 ### 🛠 技术栈
 
-HTML / CSS / JavaScript（纯原生，没有框架）
+HTML / CSS / JavaScript（纯原生前端） + Tauri / Rust（桌面壳与本地存储）
 
 ## 🤝 贡献
 

@@ -1,0 +1,8 @@
+.env
+*.key
+*.pem
+*.p12
+**/secrets.*
+**/.env.*
+.DS_Store
+src-tauri/target/

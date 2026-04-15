@@ -1,0 +1,37 @@
+#!/bin/zsh
+
+set -eu
+
+APP_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_ROOT="$(cd "$APP_DIR/../../.." && pwd)"
+DEBUG_BIN="$PROJECT_ROOT/src-tauri/target/debug/mindspark-desktop"
+RELEASE_BIN="$PROJECT_ROOT/src-tauri/target/release/mindspark-desktop"
+
+resolve_binary() {
+    if [ -x "$RELEASE_BIN" ]; then
+        echo "$RELEASE_BIN"
+        return 0
+    fi
+    if [ -x "$DEBUG_BIN" ]; then
+        echo "$DEBUG_BIN"
+        return 0
+    fi
+    return 1
+}
+
+case "${1:-}" in
+    --probe)
+        echo "project_root=$PROJECT_ROOT"
+        echo "debug_bin=$DEBUG_BIN"
+        echo "release_bin=$RELEASE_BIN"
+        echo "binary_exists=$([ -x "$DEBUG_BIN" ] || [ -x "$RELEASE_BIN" ] && echo yes || echo no)"
+        exit 0
+        ;;
+esac
+
+if ! APP_BIN="$(resolve_binary)"; then
+    osascript -e 'display alert "MindSpark launcher error" message "Could not find the desktop binary. Build the Tauri app first, then reopen MindSpark.app." as critical'
+    exit 1
+fi
+
+exec "$APP_BIN"
